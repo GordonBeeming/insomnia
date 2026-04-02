@@ -276,26 +276,31 @@ jobs:
 
           # Generate the cask definition with the new version and SHA
           mkdir -p /tmp/homebrew-tap/Casks
-          cat > /tmp/homebrew-tap/Casks/insomnia.rb << CASK_EOF
-cask "insomnia" do
-  version "${VERSION}"
-  sha256 "${DMG_SHA256}"
+          cat > /tmp/homebrew-tap/Casks/insomnia.rb << 'CASK_EOF'
+          cask "insomnia" do
+            version "${VERSION}"
+            sha256 "${DMG_SHA256}"
 
-  url "https://github.com/gordonbeeming/insomnia/releases/download/v#{version}/Insomnia-#{version}.dmg"
-  name "Insomnia"
-  desc "Caffeinate utility — the tool that never sleeps"
-  homepage "https://github.com/gordonbeeming/insomnia"
+            url "https://github.com/gordonbeeming/insomnia/releases/download/v#{version}/Insomnia-#{version}.dmg"
+            name "Insomnia"
+            desc "Caffeinate utility — the tool that never sleeps"
+            homepage "https://github.com/gordonbeeming/insomnia"
 
-  depends_on macos: ">= :sonoma"
+            depends_on macos: ">= :sonoma"
 
-  app "Insomnia.app"
+            app "Insomnia.app"
 
-  zap trash: [
-    "~/Library/Application Support/Insomnia",
-    "~/Library/Preferences/com.gordonbeeming.insomnia.plist",
-  ]
-end
-CASK_EOF
+            zap trash: [
+              "~/Library/Application Support/Insomnia",
+              "~/Library/Preferences/com.gordonbeeming.insomnia.plist",
+            ]
+          end
+          CASK_EOF
+          # Remove the leading whitespace from the heredoc
+          sed -i '' 's/^          //' /tmp/homebrew-tap/Casks/insomnia.rb
+          # Substitute shell variables (heredoc used single quotes to avoid YAML issues)
+          sed -i '' "s/\${VERSION}/${VERSION}/g" /tmp/homebrew-tap/Casks/insomnia.rb
+          sed -i '' "s/\${DMG_SHA256}/${DMG_SHA256}/g" /tmp/homebrew-tap/Casks/insomnia.rb
 
           # Commit and push the updated cask
           cd /tmp/homebrew-tap
