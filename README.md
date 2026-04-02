@@ -46,11 +46,13 @@ Download the latest release from [GitHub Releases](https://github.com/gordonbeem
 - **Insomnia.dmg** -- GUI app, drag to Applications
 - **insomnia** -- standalone CLI binary
 
-### Homebrew
+### Homebrew (recommended)
+
+> **Note:** There is an unrelated app called "Insomnia" (API client) in the default Homebrew cask repo.
+> Always use the fully qualified name below to install this app.
 
 ```bash
-# Coming soon
-brew install gordonbeeming/tap/insomnia
+brew install --cask gordonbeeming/tap/insomnia
 ```
 
 ## CLI Usage

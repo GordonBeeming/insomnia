@@ -34,6 +34,11 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 450, height: 350)
+        .onDisappear {
+            // Apply the dock icon setting now that the window is closing
+            // This is deferred from the toggle to avoid hiding the window mid-interaction
+            viewModel.applyDockIconVisibility()
+        }
     }
 
     // MARK: - General Section
@@ -52,16 +57,9 @@ struct SettingsView: View {
 
     // MARK: - Appearance Section
 
-    /// Settings for menu bar icon style and information display.
+    /// Settings for menu bar appearance and information display.
     private var appearanceSection: some View {
         Section("Appearance") {
-            // Icon style picker — default, minimal, or dapple
-            Picker("Icon style", selection: $viewModel.iconStyle) {
-                ForEach(IconStyle.allCases, id: \.self) { style in
-                    Text(style.displayName).tag(style)
-                }
-            }
-
             // Toggle to hide the icon when not caffeinated
             Toggle("Hide icon when decaffeinated", isOn: $viewModel.hideIconWhenDecaffeinated)
 

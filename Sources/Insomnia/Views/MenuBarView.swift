@@ -46,9 +46,7 @@ struct MenuBarView: View {
 
         // Schedule editor link
         Button("Schedules...") {
-            // Open the schedule editor as a separate window and bring to front
-            openWindow(id: "schedules")
-            NSApplication.shared.activate(ignoringOtherApps: true)
+            activateAndOpen(windowId: "schedules")
         }
 
         Divider()
@@ -98,8 +96,7 @@ struct MenuBarView: View {
 
             // Custom duration opens a separate input window
             Button("Custom...") {
-                openWindow(id: "duration-picker")
-                NSApplication.shared.activate(ignoringOtherApps: true)
+                activateAndOpen(windowId: "duration-picker")
             }
         }
     }
@@ -109,9 +106,7 @@ struct MenuBarView: View {
     /// Opens a time picker window for "caffeinate until" functionality.
     private var caffeinateUntilButton: some View {
         Button("Caffeinate Until...") {
-            // Open the time picker as a separate window and bring to front
-            openWindow(id: "time-picker")
-            NSApplication.shared.activate(ignoringOtherApps: true)
+            activateAndOpen(windowId: "time-picker")
         }
     }
 
@@ -146,16 +141,11 @@ struct MenuBarView: View {
     private var footerSection: some View {
         Group {
             Button("Settings...") {
-                // Open the SwiftUI Settings scene via NSApp (compatible with all macOS 14+ SDKs)
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-                // Bring the app to the front so Settings isn't hidden behind other windows
-                NSApplication.shared.activate(ignoringOtherApps: true)
+                activateAndOpen(windowId: "settings")
             }
 
             Button("About \(BuildEnvironment.appName)") {
-                // Open the about window and bring to front
-                openWindow(id: "about")
-                NSApplication.shared.activate(ignoringOtherApps: true)
+                activateAndOpen(windowId: "about")
             }
 
             Divider()
@@ -164,6 +154,20 @@ struct MenuBarView: View {
                 // Terminate the application
                 NSApplication.shared.terminate(nil)
             }
+        }
+    }
+
+    // MARK: - Helpers
+
+    /// Switches to regular activation policy, opens a window, reapplies the app icon,
+    /// and activates the app so the window appears in front.
+    private func activateAndOpen(windowId: String) {
+        NSApp.setActivationPolicy(.regular)
+        openWindow(id: windowId)
+        // Reapply the cached icon since macOS resets it when switching activation policies
+        (NSApp.delegate as? AppDelegate)?.reapplyAppIcon()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NSApplication.shared.activate(ignoringOtherApps: true)
         }
     }
 }
