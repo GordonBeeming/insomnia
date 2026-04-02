@@ -75,27 +75,20 @@ final class SettingsViewModel {
     // MARK: - Dock Icon
 
     /// Whether the dock icon is visible.
-    ///
-    /// When `true`, the app appears in the Dock via `.regular` activation policy.
-    /// When `false`, it hides from the Dock via `.accessory` policy.
-    var showDockIcon: Bool = false {
-        didSet {
-            // Switch between showing and hiding the dock icon
-            updateDockIconVisibility(showDockIcon)
-        }
-    }
+    /// The actual activation policy change is deferred to when Settings closes
+    /// (via onDisappear) to avoid hiding the settings window mid-interaction.
+    var showDockIcon: Bool = false
 
-    // MARK: - Private Helpers
+    // MARK: - Public Helpers
 
-    /// Updates the dock icon visibility by changing the app's activation policy.
-    ///
-    /// - Parameter visible: Whether the dock icon should be shown.
-    private func updateDockIconVisibility(_ visible: Bool) {
-        if visible {
-            // Show the dock icon — app appears in Dock and Cmd+Tab
+    /// Applies the dock icon visibility setting by changing the activation policy.
+    /// Called when the settings window closes, not on every toggle change.
+    func applyDockIconVisibility() {
+        if showDockIcon {
             NSApp.setActivationPolicy(.regular)
+            // Reapply the custom icon since macOS resets it on policy change
+            (NSApp.delegate as? AppDelegate)?.reapplyAppIcon()
         } else {
-            // Hide the dock icon — menu bar-only mode
             NSApp.setActivationPolicy(.accessory)
         }
     }

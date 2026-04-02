@@ -16,12 +16,12 @@ public enum Dapple {
     ///
     /// Designed to be compact and recognizable at monospace font sizes.
     public static let asciiArt = """
-        .-o-OO-o-.
-       (__________)
-          |    |
-          |    |
-          |____|
-          Dapple
+      .-o-OO-o-.
+     (__________)
+      | @  @ |
+      |      |
+      |------|
+       Dapple
     """
 
     /// The application's tagline, suitable for headers and splash screens.

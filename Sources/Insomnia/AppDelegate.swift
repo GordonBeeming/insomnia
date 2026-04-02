@@ -34,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The dock icon controller for updating the dock tile image.
     let dockIconController = DockIconController()
 
+    /// The loaded app icon, cached so it can be reapplied when switching activation policies.
+    var cachedAppIcon: NSImage?
+
     // MARK: - NSApplicationDelegate
 
     /// Called when the application finishes launching.
@@ -51,9 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print("Failed to start IPC server: \(error.localizedDescription)")
         }
 
-        // Set initial dock icon to replace the generic "exec" terminal icon
-        // This is especially important when running via `swift run` without an app bundle
-        dockIconController.update(for: scheduler.powerManager.state)
+        // Set the app icon from Resources/AppIcon.icns if available
+        // This replaces the generic "exec" terminal icon when running via `swift run`
+        loadAppIcon()
 
         // Set the app's menu bar to accessory mode (no dock icon by default)
         NSApp.setActivationPolicy(.accessory)
@@ -74,5 +77,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Stop the IPC server and remove the socket file
         ipcServer?.stop()
         ipcServer = nil
+    }
+
+    // MARK: - Private Helpers
+
+    /// Loads AppIcon.icns and caches it for reuse when switching activation policies.
+    private func loadAppIcon() {
+        // Try loading from the app bundle first (release builds)
+        if let bundleIcon = Bundle.main.image(forResource: "AppIcon") {
+            cachedAppIcon = bundleIcon
+            NSApp.applicationIconImage = bundleIcon
+            return
+        }
+        // Try from current working directory (most reliable for `swift run`)
+        let cwdPath = FileManager.default.currentDirectoryPath + "/Resources/AppIcon.icns"
+        if let icon = NSImage(contentsOfFile: cwdPath) {
+            cachedAppIcon = icon
+            NSApp.applicationIconImage = icon
+            return
+        }
+        // Fall back to searching upward from the executable's real path
+        let execPath = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        var searchDir = execPath.deletingLastPathComponent()
+        for _ in 0..<6 {
+            let iconPath = searchDir.appendingPathComponent("Resources/AppIcon.icns").path
+            if let icon = NSImage(contentsOfFile: iconPath) {
+                cachedAppIcon = icon
+                NSApp.applicationIconImage = icon
+                return
+            }
+            searchDir = searchDir.deletingLastPathComponent()
+        }
+    }
+
+    /// Reapplies the cached app icon. Call after switching activation policy
+    /// since macOS resets the icon when toggling between .regular and .accessory.
+    func reapplyAppIcon() {
+        if let icon = cachedAppIcon {
+            NSApp.applicationIconImage = icon
+        }
     }
 }

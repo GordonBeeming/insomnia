@@ -16,9 +16,17 @@ struct AboutView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            // Dapple ASCII art in monospaced font for alignment
+            // Show the app icon loaded from Resources/AppIcon.icns
+            if let icon = AboutView.loadIcon() {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 128, height: 128)
+                    .cornerRadius(24)
+            }
+
+            // Dapple ASCII art — always shown as the mascot signature
             Text(Dapple.asciiArt)
-                .font(.system(.body, design: .monospaced))
+                .font(.custom("Menlo", size: 14))
                 .multilineTextAlignment(.center)
 
             // Application name in large title font — shows "Dev" suffix in debug builds
@@ -57,5 +65,17 @@ struct AboutView: View {
     private var appVersion: String {
         // Read CFBundleShortVersionString from the app bundle
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+    }
+
+    /// Loads the app icon directly from the cached icon on the AppDelegate.
+    /// Falls back to searching Resources/AppIcon.icns from the working directory.
+    static func loadIcon() -> NSImage? {
+        // Try the cached icon from AppDelegate first
+        if let cached = (NSApp.delegate as? AppDelegate)?.cachedAppIcon {
+            return cached
+        }
+        // Try from current working directory
+        let cwdPath = FileManager.default.currentDirectoryPath + "/Resources/AppIcon.icns"
+        return NSImage(contentsOfFile: cwdPath)
     }
 }

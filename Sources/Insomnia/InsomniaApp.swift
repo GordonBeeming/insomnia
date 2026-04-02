@@ -41,11 +41,12 @@ struct InsomniaApp: App {
         .menuBarExtraStyle(.menu)
 
         // Settings window opened via "Settings..." menu item
-        Settings {
+        Window("Settings", id: "settings") {
             if let viewModel {
                 SettingsView(viewModel: SettingsViewModel(configuration: viewModel.configuration))
             }
         }
+        .windowResizability(.contentSize)
 
         // About dialog window — uses BuildEnvironment for variant-aware title
         Window("About \(BuildEnvironment.appName)", id: "about") {

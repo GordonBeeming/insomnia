@@ -118,6 +118,12 @@ mkdir -p "${RESOURCES_DIR}"
 # Copy the GUI executable into the MacOS directory
 cp "${GUI_BIN_PATH}" "${MACOS_DIR}/${GUI_TARGET}"
 
+# Copy the app icon into the Resources directory
+if [[ -f "${PROJECT_ROOT}/Resources/AppIcon.icns" ]]; then
+  cp "${PROJECT_ROOT}/Resources/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
+  echo "✅ App icon → ${RESOURCES_DIR}/AppIcon.icns"
+fi
+
 # --- Generate Info.plist -----------------------------------------------------
 # Info.plist tells macOS how to launch and identify the application.
 # CFBundleIdentifier  — reverse-DNS unique app identifier
@@ -144,6 +150,8 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
     <string>1.0.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>
