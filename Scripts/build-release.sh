@@ -141,6 +141,10 @@ mkdir -p "${RESOURCES_DIR}"
 # Copy the GUI executable into the MacOS directory
 cp "${GUI_BIN_PATH}" "${MACOS_DIR}/${GUI_TARGET}"
 
+# Embed the CLI binary inside the app bundle so Homebrew can symlink it
+cp "${DIST_DIR}/insomnia" "${MACOS_DIR}/insomnia-cli"
+echo "✅ CLI binary embedded → ${MACOS_DIR}/insomnia-cli"
+
 # Copy the app icon into the Resources directory
 if [[ -f "${PROJECT_ROOT}/Resources/AppIcon.icns" ]]; then
   cp "${PROJECT_ROOT}/Resources/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"

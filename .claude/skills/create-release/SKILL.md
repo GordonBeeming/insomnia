@@ -1,4 +1,5 @@
 ---
+name: create-release
 description: Create a new draft release for Insomnia. Use when the user says "create a release", "new release", "cut a release", or "ship it".
 ---
 
