@@ -1,0 +1,48 @@
+# =============================================================================
+# Insomnia macOS App — .gitignore
+# Keeps build artifacts, IDE state, and release outputs out of version control.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Swift Package Manager
+# ---------------------------------------------------------------------------
+# SPM build output — all compiled objects, intermediates, and executables
+.build/
+# SPM workspace state (machine-specific package resolution metadata)
+.swiftpm/
+
+# ---------------------------------------------------------------------------
+# Xcode
+# ---------------------------------------------------------------------------
+# Xcode derived data — build logs, indexes, intermediate build products
+DerivedData/
+# Per-user Xcode state (window positions, breakpoints, schemes)
+xcuserdata/
+# Individual user state file inside xcuserdata (binary, changes on every focus)
+*.xcuserstate
+# Source control blueprints — Xcode's own SCM metadata (not needed with git)
+*.xcscmblueprint
+
+# ---------------------------------------------------------------------------
+# macOS Finder metadata
+# ---------------------------------------------------------------------------
+# Desktop Services Store — Finder folder view preferences (auto-generated)
+.DS_Store
+
+# ---------------------------------------------------------------------------
+# Release / Distribution artifacts
+# ---------------------------------------------------------------------------
+# Distribution directory — build-release.sh outputs signed binaries here
+Distribution/
+# Disk images — final release packaging artifact
+*.dmg
+# Zip archives — alternative release packaging artifact
+*.zip
+
+# ---------------------------------------------------------------------------
+# Miscellaneous
+# ---------------------------------------------------------------------------
+# Vim swap files
+*.swp
+# Editor backup files
+*~

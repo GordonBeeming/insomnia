@@ -1,0 +1,250 @@
+# =============================================================================
+# build.yml — CI/CD pipeline for Insomnia macOS app
+#
+# Triggers:
+#   - Push to main        → build + test (validates code compiles and passes)
+#   - Pull request to main → build + test (gate for merge)
+#   - Published release   → build + test + sign + notarize + package + upload
+#
+# Secrets required (set in GitHub repo Settings → Secrets → Actions):
+#   DEVELOPER_ID_CERTIFICATE  — Base64-encoded .p12 file containing the
+#                                "Developer ID Application" signing certificate
+#   DEVELOPER_ID_PASSWORD     — Password used to protect the .p12 file
+#   APPLE_ID                  — Apple Developer account email address
+#   APPLE_TEAM_ID             — 10-character Apple Developer Team ID
+#   APPLE_APP_PASSWORD        — App-specific password generated at
+#                                appleid.apple.com for notarytool auth
+# =============================================================================
+
+name: Build and Test
+
+# --- Trigger conditions ------------------------------------------------------
+on:
+  # Run on every push to the main branch
+  push:
+    branches: [main]
+  # Run on every pull request targeting main
+  pull_request:
+    branches: [main]
+  # Run when a GitHub Release is published (triggers the release job)
+  release:
+    types: [published]
+
+# =============================================================================
+# Job 1: Build and Test
+# Compiles all targets and runs the test suite on every trigger.
+# =============================================================================
+jobs:
+  build-and-test:
+    # Use macOS 14 runner — provides Apple Silicon (M1) hardware for arm64 builds
+    runs-on: macos-14
+    # Human-readable name shown in the GitHub Actions UI
+    name: Build & Test
+
+    steps:
+      # --- Checkout the repository -------------------------------------------
+      # Fetches the full repo so swift build has access to all source files
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # --- Display Swift version ---------------------------------------------
+      # Logs the Swift toolchain version for build reproducibility and debugging
+      - name: Print Swift version
+        run: swift --version
+
+      # --- Build all targets --------------------------------------------------
+      # Compiles every target defined in Package.swift (CLI, GUI, Core, Tests)
+      # This catches compilation errors before running tests
+      - name: Build all targets
+        run: swift build --build-tests
+
+      # --- Run tests ----------------------------------------------------------
+      # Executes all test targets (unit + integration tests)
+      # --parallel runs test cases concurrently for faster feedback
+      - name: Run tests
+        run: swift test --parallel
+
+  # =============================================================================
+  # Job 2: Release
+  # Only runs when a GitHub Release is published. Builds, signs, notarizes,
+  # packages, and uploads the release artifacts.
+  # =============================================================================
+  release:
+    # Only run after build-and-test passes
+    needs: build-and-test
+    # Only trigger on release events (not on push or PR)
+    if: github.event_name == 'release'
+    # Apple Silicon runner for native arm64 builds
+    runs-on: macos-14
+    name: Sign, Notarize & Release
+
+    steps:
+      # --- Checkout -----------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # --- Build release artifacts -------------------------------------------
+      # Runs the build script that produces the CLI binary and .app bundle
+      - name: Build release artifacts
+        run: |
+          # Make the script executable (git may not preserve the +x bit)
+          chmod +x Scripts/build-release.sh
+          # Run the build — outputs to Distribution/
+          ./Scripts/build-release.sh
+
+      # --- Import signing certificate ----------------------------------------
+      # The Developer ID certificate is stored as a base64-encoded secret.
+      # We decode it, import it into a temporary keychain, and set it as the
+      # default so codesign can find it automatically.
+      - name: Import signing certificate
+        env:
+          # Base64-encoded .p12 certificate file
+          CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE }}
+          # Password to unlock the .p12 file
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+        run: |
+          # Decode the certificate from base64 into a .p12 file
+          echo "${CERTIFICATE_BASE64}" | base64 --decode > certificate.p12
+
+          # Create a temporary keychain to hold the signing certificate
+          # Using a temporary keychain avoids polluting the system keychain
+          KEYCHAIN_PATH="${RUNNER_TEMP}/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+
+          # Create the keychain with a random password
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+          # Set it as the default keychain so codesign finds the certificate
+          security default-keychain -s "${KEYCHAIN_PATH}"
+
+          # Unlock the keychain (required before importing)
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+          # Import the .p12 into the keychain
+          # -T /usr/bin/codesign grants codesign access to use this certificate
+          security import certificate.p12 \
+            -k "${KEYCHAIN_PATH}" \
+            -P "${CERTIFICATE_PASSWORD}" \
+            -T /usr/bin/codesign
+
+          # Allow codesign to access the keychain without GUI prompts
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "${KEYCHAIN_PASSWORD}" \
+            "${KEYCHAIN_PATH}"
+
+          # Clean up the decoded certificate file
+          rm certificate.p12
+
+      # --- Sign the .app bundle ----------------------------------------------
+      # codesign applies the Developer ID signature required for distribution
+      # outside the Mac App Store (Gatekeeper checks this).
+      - name: Sign application
+        run: |
+          # --deep       → sign all nested binaries and frameworks
+          # --force      → replace any existing signature
+          # --options runtime  → enable hardened runtime (required for notarization)
+          # --timestamp  → include a secure timestamp (required for notarization)
+          codesign --deep --force \
+            --options runtime \
+            --timestamp \
+            --sign "Developer ID Application" \
+            Distribution/Insomnia.app
+
+          # Also sign the standalone CLI binary
+          codesign --force \
+            --options runtime \
+            --timestamp \
+            --sign "Developer ID Application" \
+            Distribution/insomnia
+
+      # --- Notarize the .app --------------------------------------------------
+      # Apple notarization scans the binary for malware and issues a ticket.
+      # Without notarization, macOS Gatekeeper blocks the app on first launch.
+      - name: Notarize application
+        env:
+          # Apple Developer account email
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          # Apple Developer Team ID (10-char alphanumeric)
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # App-specific password for notarytool authentication
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          # Create a zip of the .app for upload to Apple's notary service
+          # (notarytool accepts .zip, .dmg, or .pkg)
+          ditto -c -k --keepParent Distribution/Insomnia.app Distribution/Insomnia-notarize.zip
+
+          # Submit to Apple's notary service and wait for the result
+          # --wait blocks until Apple finishes scanning (usually 2-10 minutes)
+          xcrun notarytool submit Distribution/Insomnia-notarize.zip \
+            --apple-id "${APPLE_ID}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --password "${APPLE_APP_PASSWORD}" \
+            --wait
+
+          # Clean up the temporary zip — we'll create a DMG for distribution
+          rm Distribution/Insomnia-notarize.zip
+
+      # --- Staple the notarization ticket ------------------------------------
+      # Stapling embeds the notarization ticket directly in the .app bundle.
+      # This allows Gatekeeper to verify offline without contacting Apple's servers.
+      - name: Staple notarization ticket
+        run: |
+          xcrun stapler staple Distribution/Insomnia.app
+
+      # --- Create DMG ---------------------------------------------------------
+      # Package the .app into a DMG disk image for end-user distribution.
+      # DMGs are the standard macOS distribution format for non-App Store apps.
+      - name: Create DMG
+        run: |
+          # Extract the version from the release tag (e.g., "v1.2.0" → "1.2.0")
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          # hdiutil creates the disk image:
+          # -volname     → name shown when the DMG is mounted in Finder
+          # -srcfolder   → directory containing the .app to include
+          # -ov          → overwrite if the DMG already exists
+          # -format UDZO → compressed read-only image (standard for distribution)
+          hdiutil create \
+            -volname "Insomnia" \
+            -srcfolder Distribution/Insomnia.app \
+            -ov \
+            -format UDZO \
+            "Distribution/Insomnia-${VERSION}.dmg"
+
+      # --- Package CLI for Homebrew -------------------------------------------
+      # Create a tar.gz archive of the CLI binary for Homebrew formula distribution
+      - name: Package CLI archive
+        run: |
+          # Extract version from the release tag
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Make the packaging script executable
+          chmod +x Scripts/package-for-homebrew.sh
+          # Run the Homebrew packaging script (creates archive + prints formula)
+          ./Scripts/package-for-homebrew.sh "${VERSION}"
+
+      # --- Upload artifacts to GitHub Release --------------------------------
+      # Attaches the DMG and CLI archive to the GitHub Release page so users
+      # can download them directly from the repository's Releases tab.
+      - name: Upload release assets
+        env:
+          # GitHub token with write access to the release (auto-provided)
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Extract version from the release tag
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          # Upload the DMG (GUI app installer)
+          gh release upload "${GITHUB_REF_NAME}" \
+            "Distribution/Insomnia-${VERSION}.dmg" \
+            --clobber
+
+          # Upload the CLI tar.gz (Homebrew / manual install)
+          gh release upload "${GITHUB_REF_NAME}" \
+            "Distribution/insomnia-${VERSION}-arm64-apple-macosx.tar.gz" \
+            --clobber
+
+          # Upload the standalone CLI binary (direct download)
+          gh release upload "${GITHUB_REF_NAME}" \
+            "Distribution/insomnia" \
+            --clobber
