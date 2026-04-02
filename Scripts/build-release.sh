@@ -149,9 +149,9 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>
     <string>${GUI_TARGET}</string>
     <key>CFBundleVersion</key>
-    <string>${APP_VERSION}.${BUILD_NUMBER}</string>
+    <string>${APP_VERSION%.*}.${BUILD_NUMBER}</string>
     <key>CFBundleShortVersionString</key>
-    <string>${APP_VERSION}</string>
+    <string>${APP_VERSION%.*}.${BUILD_NUMBER}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
