@@ -32,7 +32,7 @@ cd "${PROJECT_ROOT}"
 # Output directory for all release artifacts
 DIST_DIR="${PROJECT_ROOT}/Distribution"
 # Name of the CLI executable target defined in Package.swift
-CLI_TARGET="insomnia"
+CLI_TARGET="InsomniaCLI"
 # Name of the GUI executable target defined in Package.swift
 GUI_TARGET="Insomnia"
 # Architecture to build for (Apple Silicon)
@@ -69,9 +69,10 @@ if [[ ! -f "${CLI_BIN_PATH}" ]]; then
   exit 1
 fi
 
-# Copy the CLI binary to the distribution directory
-cp "${CLI_BIN_PATH}" "${DIST_DIR}/${CLI_TARGET}"
-echo "✅ CLI binary → ${DIST_DIR}/${CLI_TARGET}"
+# Copy the CLI binary to the distribution directory, renamed to 'insomnia'
+# for a cleaner user-facing command name
+cp "${CLI_BIN_PATH}" "${DIST_DIR}/insomnia"
+echo "✅ CLI binary → ${DIST_DIR}/insomnia"
 
 # =============================================================================
 # Step 2: Build the GUI app
@@ -162,7 +163,7 @@ echo ""
 echo "========================================="
 echo "  Release build complete"
 echo "========================================="
-echo "  CLI binary:  ${DIST_DIR}/${CLI_TARGET}"
+echo "  CLI binary:  ${DIST_DIR}/insomnia"
 echo "  GUI app:     ${APP_BUNDLE}"
 echo "========================================="
 echo ""
