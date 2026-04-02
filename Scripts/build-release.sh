@@ -39,10 +39,22 @@ GUI_TARGET="Insomnia"
 ARCH="arm64"
 # Build configuration — Release enables optimizations and strips debug symbols
 BUILD_CONFIG="release"
-# Version from the first argument (e.g., "0.2.0"), defaults to "1.0.0"
-APP_VERSION="${1:-1.0.0}"
+# Version from the first argument (e.g., "0.2"), defaults to "1.0"
+APP_VERSION="${1:-1.0}"
 # Build number from the second argument (e.g., GitHub Actions run number), defaults to "1"
 BUILD_NUMBER="${2:-1}"
+
+# --- Validate inputs ----------------------------------------------------------
+# Ensure version looks like digits.digits (e.g., "0.2", "1.0")
+if [[ ! "${APP_VERSION}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+  echo "❌ Invalid version '${APP_VERSION}' — expected format: major.minor (e.g., 0.2)" >&2
+  exit 1
+fi
+# Ensure build number is numeric (may contain dots for run_attempt, e.g., "42.1")
+if [[ ! "${BUILD_NUMBER}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+  echo "❌ Invalid build number '${BUILD_NUMBER}' — expected numeric (e.g., 42 or 42.1)" >&2
+  exit 1
+fi
 
 # --- Clean previous artifacts ------------------------------------------------
 echo "🧹 Cleaning previous Distribution/ contents..."
