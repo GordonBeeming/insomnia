@@ -40,10 +40,10 @@ fi
 VERSION="$1"
 
 # --- Validate version format --------------------------------------------------
-# Enforce semver-like pattern (digits.digits.digits, optional -prerelease)
-if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+# Accept major.minor (e.g., "0.3") or major.minor.patch (e.g., "1.2.3")
+if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?(-[a-zA-Z0-9.]+)?$ ]]; then
   echo "❌ Invalid version format: '${VERSION}'" >&2
-  echo "   Expected semver like 1.2.3 or 1.2.3-beta.1" >&2
+  echo "   Expected format like 0.3 or 1.2.3" >&2
   exit 1
 fi
 
