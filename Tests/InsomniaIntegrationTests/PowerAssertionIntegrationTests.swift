@@ -39,7 +39,7 @@ final class PowerAssertionIntegrationTests: XCTestCase {
         try manager.caffeinate()
         XCTAssertEqual(manager.state, .caffeinatedIndefinitely)
         XCTAssertTrue(manager.state.isActive)
-        XCTAssertEqual(manager.currentAssertionType, .preventUserIdleSystemSleep)
+        XCTAssertEqual(manager.currentAssertionType, .preventUserIdleDisplaySleep)
     }
 
     /// Tests that decaffeinate releases the real IOKit assertion.

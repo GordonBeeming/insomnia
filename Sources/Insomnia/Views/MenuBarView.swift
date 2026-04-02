@@ -159,13 +159,10 @@ struct MenuBarView: View {
 
     // MARK: - Helpers
 
-    /// Switches to regular activation policy, opens a window, reapplies the app icon,
-    /// and activates the app so the window appears in front.
+    /// Opens a window and activates the app so the window appears in front.
+    /// The app stays in accessory mode (no dock icon) since LSUIElement is set.
     private func activateAndOpen(windowId: String) {
-        NSApp.setActivationPolicy(.regular)
         openWindow(id: windowId)
-        // Reapply the cached icon since macOS resets it when switching activation policies
-        (NSApp.delegate as? AppDelegate)?.reapplyAppIcon()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }

@@ -79,8 +79,6 @@ This lets dev and prod run side-by-side.
 ## Window Focus Pattern
 
 LSUIElement apps need special handling to show windows:
-1. `NSApp.setActivationPolicy(.regular)` before opening
-2. `openWindow(id:)` to open
-3. Reapply app icon via `AppDelegate.reapplyAppIcon()`
-4. `NSApp.activate(ignoringOtherApps: true)` after short delay
-5. Return to `.accessory` in `onDisappear` (unless dock icon enabled)
+1. `openWindow(id:)` to open
+2. `NSApp.activate(ignoringOtherApps: true)` after short delay
+The app always stays in `.accessory` mode (no dock icon).

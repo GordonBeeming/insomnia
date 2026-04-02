@@ -67,12 +67,11 @@ struct AboutView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
     }
 
-    /// Loads the app icon directly from the cached icon on the AppDelegate.
-    /// Falls back to searching Resources/AppIcon.icns from the working directory.
+    /// Loads the app icon from the application icon image or Resources directory.
     static func loadIcon() -> NSImage? {
-        // Try the cached icon from AppDelegate first
-        if let cached = (NSApp.delegate as? AppDelegate)?.cachedAppIcon {
-            return cached
+        // Try the current application icon first
+        if let icon = NSApp.applicationIconImage {
+            return icon
         }
         // Try from current working directory
         let cwdPath = FileManager.default.currentDirectoryPath + "/Resources/AppIcon.icns"

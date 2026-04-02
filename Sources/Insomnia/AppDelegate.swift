@@ -1,8 +1,8 @@
 // AppDelegate.swift — Insomnia GUI
 //
 // NSApplicationDelegate managing the application lifecycle. Owns the shared
-// CaffeinationScheduler, IPCServer, and DockIconController. Starts the IPC
-// server on launch and cleans up all resources on termination.
+// CaffeinationScheduler and IPCServer. Starts the IPC server on launch
+// and cleans up all resources on termination.
 
 import AppKit
 import InsomniaCore
@@ -13,7 +13,6 @@ import InsomniaCore
 /// - Creates and owns the shared ``CaffeinationScheduler`` used by both
 ///   the GUI and the IPC server
 /// - Starts the ``IPCServer`` on launch so the CLI can communicate
-/// - Owns the ``DockIconController`` for dock tile updates
 /// - Releases all power assertions and stops the IPC server on termination
 final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Shared State
@@ -30,12 +29,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The IPC server that receives commands from the CLI.
     /// Initialized lazily when the app finishes launching.
     private var ipcServer: IPCServer?
-
-    /// The dock icon controller for updating the dock tile image.
-    let dockIconController = DockIconController()
-
-    /// The loaded app icon, cached so it can be reapplied when switching activation policies.
-    var cachedAppIcon: NSImage?
 
     // MARK: - NSApplicationDelegate
 
@@ -58,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // This replaces the generic "exec" terminal icon when running via `swift run`
         loadAppIcon()
 
-        // Set the app's menu bar to accessory mode (no dock icon by default)
+        // Ensure the app runs as a menu bar-only app (no dock icon)
         NSApp.setActivationPolicy(.accessory)
     }
 
@@ -81,18 +74,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Private Helpers
 
-    /// Loads AppIcon.icns and caches it for reuse when switching activation policies.
+    /// Loads AppIcon.icns and sets it as the application icon.
     private func loadAppIcon() {
         // Try loading from the app bundle first (release builds)
         if let bundleIcon = Bundle.main.image(forResource: "AppIcon") {
-            cachedAppIcon = bundleIcon
             NSApp.applicationIconImage = bundleIcon
             return
         }
         // Try from current working directory (most reliable for `swift run`)
         let cwdPath = FileManager.default.currentDirectoryPath + "/Resources/AppIcon.icns"
         if let icon = NSImage(contentsOfFile: cwdPath) {
-            cachedAppIcon = icon
             NSApp.applicationIconImage = icon
             return
         }
@@ -102,19 +93,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for _ in 0..<6 {
             let iconPath = searchDir.appendingPathComponent("Resources/AppIcon.icns").path
             if let icon = NSImage(contentsOfFile: iconPath) {
-                cachedAppIcon = icon
                 NSApp.applicationIconImage = icon
                 return
             }
             searchDir = searchDir.deletingLastPathComponent()
-        }
-    }
-
-    /// Reapplies the cached app icon. Call after switching activation policy
-    /// since macOS resets the icon when toggling between .regular and .accessory.
-    func reapplyAppIcon() {
-        if let icon = cachedAppIcon {
-            NSApp.applicationIconImage = icon
         }
     }
 }

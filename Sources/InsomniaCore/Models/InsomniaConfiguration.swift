@@ -43,8 +43,6 @@ private enum ConfigKeys {
     static var iconStyle: String { "\(BuildEnvironment.defaultsPrefix)iconStyle" }
     /// Whether to show remaining time in the menu bar title.
     static var showRemainingTimeInMenuBar: String { "\(BuildEnvironment.defaultsPrefix)showRemainingTimeInMenuBar" }
-    /// Whether to prevent display sleep (vs. only system sleep).
-    static var preventDisplaySleep: String { "\(BuildEnvironment.defaultsPrefix)preventDisplaySleep" }
     /// Whether to launch the app at system login.
     static var launchAtLogin: String { "\(BuildEnvironment.defaultsPrefix)launchAtLogin" }
     /// JSON-encoded array of schedule rules.
@@ -89,15 +87,6 @@ public final class InsomniaConfiguration {
         }
     }
 
-    /// Whether to prevent display sleep in addition to system sleep.
-    /// When `true`, uses `preventUserIdleDisplaySleep` instead of system sleep.
-    public var preventDisplaySleep: Bool {
-        didSet {
-            // Persist the updated value to UserDefaults
-            defaults.set(preventDisplaySleep, forKey: ConfigKeys.preventDisplaySleep)
-        }
-    }
-
     /// Whether the application should launch automatically at system login.
     public var launchAtLogin: Bool {
         didSet {
@@ -131,7 +120,6 @@ public final class InsomniaConfiguration {
             self.iconStyle = .default
         }
         self.showRemainingTimeInMenuBar = defaults.bool(forKey: ConfigKeys.showRemainingTimeInMenuBar)
-        self.preventDisplaySleep = defaults.bool(forKey: ConfigKeys.preventDisplaySleep)
         self.launchAtLogin = defaults.bool(forKey: ConfigKeys.launchAtLogin)
         // Load schedule rules from JSON data
         self.scheduleRules = InsomniaConfiguration.loadScheduleRules(from: defaults)
@@ -179,12 +167,10 @@ public final class InsomniaConfiguration {
 
     // MARK: - Convenience
 
-    /// The preferred assertion type based on the current configuration.
+    /// The assertion type used for all caffeination modes.
     ///
-    /// Returns display sleep prevention if `preventDisplaySleep` is enabled,
-    /// otherwise returns system sleep prevention.
+    /// Always prevents display sleep (which implicitly prevents system sleep).
     public var preferredAssertionType: PowerAssertionType {
-        // Choose assertion type based on the display sleep setting
-        return preventDisplaySleep ? .preventUserIdleDisplaySleep : .preventUserIdleSystemSleep
+        return .preventUserIdleDisplaySleep
     }
 }

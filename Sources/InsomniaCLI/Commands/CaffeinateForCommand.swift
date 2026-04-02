@@ -31,10 +31,6 @@ struct CaffeinateForCommand: ParsableCommand {
     @Argument(help: "Duration to caffeinate (e.g., 30m, 2h, 1h30m, 90s)")
     var duration: String
 
-    /// When set, also prevents display sleep in addition to system sleep.
-    @Flag(name: .long, help: "Also prevent display sleep")
-    var display: Bool = false
-
     // MARK: - Execution
 
     /// Runs the caffeinate-for command.
@@ -69,15 +65,10 @@ struct CaffeinateForCommand: ParsableCommand {
     ///
     /// - Parameter duration: The parsed duration option specifying how long to caffeinate.
     private func runStandalone(duration: DurationOption) throws {
-        // Determine the assertion type based on the --display flag
-        let assertionType: PowerAssertionType = display
-            ? .preventUserIdleDisplaySleep
-            : .preventUserIdleSystemSleep
-
         // Create the power assertion manager with real IOKit provider
         let manager = PowerAssertionManager()
-        // Start the timed caffeination assertion
-        try manager.caffeinate(for: duration.timeInterval, type: assertionType)
+        // Start the timed caffeination assertion (prevents display + system sleep)
+        try manager.caffeinate(for: duration.timeInterval)
 
         // Display the standalone mode banner with current state
         CLIOutput.printStandalone(state: manager.state)
