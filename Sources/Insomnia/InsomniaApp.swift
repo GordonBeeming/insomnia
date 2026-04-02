@@ -47,8 +47,8 @@ struct InsomniaApp: App {
             }
         }
 
-        // About dialog window
-        Window("About Insomnia", id: "about") {
+        // About dialog window — uses BuildEnvironment for variant-aware title
+        Window("About \(BuildEnvironment.appName)", id: "about") {
             AboutView()
         }
         .windowResizability(.contentSize)

@@ -57,24 +57,27 @@ final class MenuBarViewModel {
     /// Human-readable status text for the menu bar dropdown header.
     ///
     /// Shows an emoji prefix and the state description, including remaining
-    /// time when applicable.
+    /// time when applicable. Appends "(Dev)" suffix in debug builds so you
+    /// can tell dev and prod apart at a glance.
     var statusText: String {
+        // Dev suffix helps distinguish dev from prod when both are running
+        let suffix = BuildEnvironment.menuBarSuffix
         switch currentState {
         case .decaffeinated:
             // Sleeping state with zzz emoji
-            return "\u{1F4A4} Decaffeinated"
+            return "\u{1F4A4} Decaffeinated\(suffix)"
         case .caffeinatedIndefinitely:
             // Active state with coffee emoji
-            return "\u{2615} Caffeinated"
+            return "\u{2615} Caffeinated\(suffix)"
         case .caffeinatedUntil:
             // Timed state — append remaining time if available
             if let remaining = currentState.remainingDescription {
-                return "\u{2615} Caffeinated \u{2014} \(remaining)"
+                return "\u{2615} Caffeinated \u{2014} \(remaining)\(suffix)"
             }
-            return "\u{2615} Caffeinated"
+            return "\u{2615} Caffeinated\(suffix)"
         case .caffeinatedWhileRunning(_, let appName):
             // App-watching state — show which app
-            return "\u{2615} Caffeinated while \(appName) runs"
+            return "\u{2615} Caffeinated while \(appName) runs\(suffix)"
         }
     }
 

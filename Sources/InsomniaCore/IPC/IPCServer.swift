@@ -31,19 +31,17 @@ public final class IPCServer {
     private var clientSources: [DispatchSourceRead] = []
 
     /// Default socket directory path inside Application Support.
+    /// Uses BuildEnvironment to separate dev and prod socket locations.
     public static var defaultSocketDirectory: String {
-        // Use Application Support for the socket directory
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!.path
-        return "\(appSupport)/Insomnia"
+        // Delegate to BuildEnvironment for variant-aware path
+        BuildEnvironment.socketDirectory
     }
 
     /// Default socket file path.
+    /// Uses BuildEnvironment to separate dev and prod socket files.
     public static var defaultSocketPath: String {
-        // Socket file lives inside the app support directory
-        return "\(defaultSocketDirectory)/insomnia.sock"
+        // Delegate to BuildEnvironment for variant-aware path
+        BuildEnvironment.socketPath
     }
 
     // MARK: - Initialization

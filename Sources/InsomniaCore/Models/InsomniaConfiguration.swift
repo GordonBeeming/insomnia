@@ -34,20 +34,21 @@ public enum IconStyle: String, Codable, CaseIterable, Sendable {
 
 /// Keys used for storing configuration values in UserDefaults.
 ///
-/// Namespaced under "com.insomnia." to avoid collisions with other defaults.
+/// Uses BuildEnvironment.defaultsPrefix to namespace keys, so dev and prod
+/// builds store settings independently and don't interfere with each other.
 private enum ConfigKeys {
     /// Whether to hide the menu bar icon when decaffeinated.
-    static let hideIconWhenDecaffeinated = "com.insomnia.hideIconWhenDecaffeinated"
+    static var hideIconWhenDecaffeinated: String { "\(BuildEnvironment.defaultsPrefix)hideIconWhenDecaffeinated" }
     /// The selected icon style for the menu bar.
-    static let iconStyle = "com.insomnia.iconStyle"
+    static var iconStyle: String { "\(BuildEnvironment.defaultsPrefix)iconStyle" }
     /// Whether to show remaining time in the menu bar title.
-    static let showRemainingTimeInMenuBar = "com.insomnia.showRemainingTimeInMenuBar"
+    static var showRemainingTimeInMenuBar: String { "\(BuildEnvironment.defaultsPrefix)showRemainingTimeInMenuBar" }
     /// Whether to prevent display sleep (vs. only system sleep).
-    static let preventDisplaySleep = "com.insomnia.preventDisplaySleep"
+    static var preventDisplaySleep: String { "\(BuildEnvironment.defaultsPrefix)preventDisplaySleep" }
     /// Whether to launch the app at system login.
-    static let launchAtLogin = "com.insomnia.launchAtLogin"
+    static var launchAtLogin: String { "\(BuildEnvironment.defaultsPrefix)launchAtLogin" }
     /// JSON-encoded array of schedule rules.
-    static let scheduleRules = "com.insomnia.scheduleRules"
+    static var scheduleRules: String { "\(BuildEnvironment.defaultsPrefix)scheduleRules" }
 }
 
 // MARK: - Configuration
