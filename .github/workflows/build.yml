@@ -292,6 +292,7 @@ jobs:
             depends_on macos: ">= :sonoma"
 
             app "Insomnia.app"
+            binary "#{appdir}/Insomnia.app/Contents/MacOS/insomnia-cli", target: "insomnia"
 
             zap trash: [
               "~/Library/Application Support/Insomnia",
