@@ -19,10 +19,7 @@ struct MenuBarView: View {
     /// The view model driving all state and actions.
     @Bindable var viewModel: MenuBarViewModel
 
-    /// Environment action to open the Settings window.
-    @Environment(\.openSettings) private var openSettings
-
-    /// Environment action to open named windows (About dialog).
+    /// Environment action to open named windows (About, Duration Picker, etc.).
     @Environment(\.openWindow) private var openWindow
 
     // MARK: - Body
@@ -149,8 +146,8 @@ struct MenuBarView: View {
     private var footerSection: some View {
         Group {
             Button("Settings...") {
-                // Open the SwiftUI Settings scene
-                openSettings()
+                // Open the SwiftUI Settings scene via NSApp (compatible with all macOS 14+ SDKs)
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                 // Bring the app to the front so Settings isn't hidden behind other windows
                 NSApplication.shared.activate(ignoringOtherApps: true)
             }
