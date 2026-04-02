@@ -21,8 +21,8 @@ struct AboutView: View {
                 .font(.system(.body, design: .monospaced))
                 .multilineTextAlignment(.center)
 
-            // Application name in large title font
-            Text("Insomnia")
+            // Application name in large title font — shows "Dev" suffix in debug builds
+            Text(BuildEnvironment.appName)
                 .font(.largeTitle)
                 .fontWeight(.bold)
 

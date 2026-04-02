@@ -152,7 +152,7 @@ struct MenuBarView: View {
                 NSApplication.shared.activate(ignoringOtherApps: true)
             }
 
-            Button("About Insomnia") {
+            Button("About \(BuildEnvironment.appName)") {
                 // Open the about window and bring to front
                 openWindow(id: "about")
                 NSApplication.shared.activate(ignoringOtherApps: true)
@@ -160,7 +160,7 @@ struct MenuBarView: View {
 
             Divider()
 
-            Button("Quit Insomnia") {
+            Button("Quit \(BuildEnvironment.appName)") {
                 // Terminate the application
                 NSApplication.shared.terminate(nil)
             }
