@@ -39,6 +39,10 @@ GUI_TARGET="Insomnia"
 ARCH="arm64"
 # Build configuration — Release enables optimizations and strips debug symbols
 BUILD_CONFIG="release"
+# Version from the first argument (e.g., "0.2.0"), defaults to "1.0.0"
+APP_VERSION="${1:-1.0.0}"
+# Build number from the second argument (e.g., GitHub Actions run number), defaults to "1"
+BUILD_NUMBER="${2:-1}"
 
 # --- Clean previous artifacts ------------------------------------------------
 echo "🧹 Cleaning previous Distribution/ contents..."
@@ -145,9 +149,9 @@ cat > "${CONTENTS_DIR}/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>
     <string>${GUI_TARGET}</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>${APP_VERSION}.${BUILD_NUMBER}</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>${APP_VERSION}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>

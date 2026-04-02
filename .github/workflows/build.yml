@@ -90,10 +90,12 @@ jobs:
       # Runs the build script that produces the CLI binary and .app bundle
       - name: Build release artifacts
         run: |
+          # Extract version from the release tag (e.g., "v0.2.0" → "0.2.0")
+          VERSION="${GITHUB_REF_NAME#v}"
           # Make the script executable (git may not preserve the +x bit)
           chmod +x Scripts/build-release.sh
-          # Run the build — outputs to Distribution/
-          ./Scripts/build-release.sh
+          # Run the build with version and run number for the bundle
+          ./Scripts/build-release.sh "${VERSION}" "${{ github.run_number }}"
 
       # --- Import signing certificate ----------------------------------------
       # The Developer ID certificate is stored as a base64-encoded secret.
