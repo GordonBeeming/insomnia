@@ -7,7 +7,14 @@
 # project root.
 #
 # Usage:
-#   ./Scripts/build-release.sh
+#   ./Scripts/build-release.sh <version> <build-number>
+#
+# Arguments:
+#   version      — major.minor version string (e.g., "0.2"). Defaults to "1.0".
+#   build-number — numeric build number (e.g., GitHub Actions run number). Defaults to "1".
+#
+# Example:
+#   ./Scripts/build-release.sh 0.2 42    # → bundle version 0.2.42
 #
 # Prerequisites:
 #   - Xcode command-line tools (swift, xcodebuild)
