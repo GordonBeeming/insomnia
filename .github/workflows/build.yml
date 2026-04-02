@@ -77,6 +77,9 @@ jobs:
     # Apple Silicon runner for native arm64 builds
     runs-on: macos-14
     name: Sign, Notarize & Release
+    # Grant write access to upload assets to the GitHub Release
+    permissions:
+      contents: write
 
     steps:
       # --- Checkout -----------------------------------------------------------
