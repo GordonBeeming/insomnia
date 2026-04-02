@@ -251,3 +251,59 @@ jobs:
           gh release upload "${GITHUB_REF_NAME}" \
             "Distribution/insomnia" \
             --clobber
+
+      # --- Update Homebrew tap ---------------------------------------------------
+      # Pushes an updated cask definition to gordonbeeming/homebrew-tap so users
+      # can install/upgrade via `brew install --cask gordonbeeming/tap/insomnia`.
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          # Compute SHA256 of the DMG for the cask definition
+          DMG_SHA256="$(shasum -a 256 "Distribution/Insomnia-${VERSION}.dmg" | awk '{print $1}')"
+
+          # Configure SSH with the deploy key for push access to the tap repo
+          mkdir -p ~/.ssh
+          echo "${HOMEBREW_TAP_DEPLOY_KEY}" > ~/.ssh/homebrew_tap_key
+          chmod 600 ~/.ssh/homebrew_tap_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/homebrew_tap_key -o StrictHostKeyChecking=no"
+
+          # Clone the tap repo
+          git clone git@github.com:GordonBeeming/homebrew-tap.git /tmp/homebrew-tap
+
+          # Generate the cask definition with the new version and SHA
+          mkdir -p /tmp/homebrew-tap/Casks
+          cat > /tmp/homebrew-tap/Casks/insomnia.rb << CASK_EOF
+cask "insomnia" do
+  version "${VERSION}"
+  sha256 "${DMG_SHA256}"
+
+  url "https://github.com/gordonbeeming/insomnia/releases/download/v#{version}/Insomnia-#{version}.dmg"
+  name "Insomnia"
+  desc "Caffeinate utility — the tool that never sleeps"
+  homepage "https://github.com/gordonbeeming/insomnia"
+
+  depends_on macos: ">= :sonoma"
+
+  app "Insomnia.app"
+
+  zap trash: [
+    "~/Library/Application Support/Insomnia",
+    "~/Library/Preferences/com.gordonbeeming.insomnia.plist",
+  ]
+end
+CASK_EOF
+
+          # Commit and push the updated cask
+          cd /tmp/homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/insomnia.rb
+          git commit -m "Update insomnia to ${VERSION}" || echo "No changes to commit"
+          git push
+
+          # Clean up the deploy key
+          rm -f ~/.ssh/homebrew_tap_key
