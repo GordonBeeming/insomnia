@@ -15,7 +15,6 @@ import InsomniaCore
 /// the version with the running app, and provides download functionality.
 /// All state properties are observable for automatic SwiftUI view updates.
 @Observable
-@MainActor
 final class UpdateChecker {
     // MARK: - Constants
 
@@ -58,11 +57,6 @@ final class UpdateChecker {
     /// Timestamp of the last successful or attempted check.
     private var lastCheckDate: Date?
 
-    // MARK: - Initialization
-
-    /// Creates an update checker. Safe to call from any context.
-    nonisolated init() {}
-
     // MARK: - Periodic Checks
 
     /// Starts periodic background update checks every hour.
@@ -83,7 +77,7 @@ final class UpdateChecker {
             repeats: true
         ) { [weak self] _ in
             guard let self else { return }
-            Task { @MainActor in
+            Task {
                 await self.checkForUpdate()
             }
         }

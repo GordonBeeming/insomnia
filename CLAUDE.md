@@ -20,11 +20,14 @@ Three targets in `Package.swift`:
 ## Build & Test
 
 ```bash
-swift build          # debug build
-swift test           # 118+ tests
-swift run Insomnia   # run GUI locally
-swift run InsomniaCLI status  # run CLI
+swift build                                        # debug build
+swift build -Xswiftc -strict-concurrency=complete  # build with strict concurrency (matches CI)
+swift test                                         # 133+ tests
+swift run Insomnia                                 # run GUI locally
+swift run InsomniaCLI status                       # run CLI
 ```
+
+**Important**: CI runs Swift 5.10 with strict concurrency checking. Always run `swift build -Xswiftc -strict-concurrency=complete` before pushing to catch actor-isolation errors that don't surface in default debug builds.
 
 ## Code Comments
 
