@@ -171,14 +171,22 @@ struct MenuBarView: View {
     @ViewBuilder
     private var updateSection: some View {
         if updateChecker.isUpdateAvailable, let version = updateChecker.latestVersion {
-            // An update is available — show download button
+            // An update is available — show download or release link
             if updateChecker.isDownloading {
                 Text("Downloading v\(version)...")
-            } else {
+            } else if updateChecker.downloadURL != nil {
+                // DMG available — offer direct download
                 Button("Download v\(version)") {
                     Task { await updateChecker.downloadAndInstall() }
                 }
+            } else {
+                // Update exists but no DMG asset — show version info only
+                Text("v\(version) available on GitHub")
             }
+        }
+        // Show error from the last check or download, if any
+        if let error = updateChecker.lastError {
+            Text(error)
         }
         if updateChecker.isChecking {
             // A check is in progress

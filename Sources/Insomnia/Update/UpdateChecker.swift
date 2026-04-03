@@ -129,12 +129,17 @@ final class UpdateChecker {
             }
             // Compare versions — update available if remote is newer
             if remoteVersion > localVersion {
-                isUpdateAvailable = true
                 latestVersion = remoteVersion.description
                 // Extract the DMG download URL from the release assets
                 if let dmg = release.dmgAsset,
-                   let url = URL(string: dmg.browserDownloadUrl) {
+                   let url = URL(string: dmg.browserDownloadUrl),
+                   Self.isAllowedDownloadHost(url) {
                     downloadURL = url
+                    isUpdateAvailable = true
+                } else {
+                    // Update exists but no valid DMG asset — still notify
+                    downloadURL = nil
+                    isUpdateAvailable = true
                 }
             } else {
                 isUpdateAvailable = false
@@ -152,6 +157,7 @@ final class UpdateChecker {
     ///
     /// The DMG is saved to `~/Downloads` and automatically mounted
     /// via `NSWorkspace` so the user can drag the app to Applications.
+    /// File I/O is performed off the main thread to avoid UI jank.
     func downloadAndInstall() async {
         guard let url = downloadURL else {
             lastError = "No download URL available"
@@ -164,18 +170,23 @@ final class UpdateChecker {
         do {
             // Download the DMG to a temporary location
             let (tempURL, _) = try await URLSession.shared.download(from: url)
-            // Build the destination path in ~/Downloads
-            let fileName = "Insomnia-\(latestVersion ?? "latest").dmg"
-            let downloadsDir = FileManager.default.urls(
-                for: .downloadsDirectory,
-                in: .userDomainMask
-            ).first!
-            let destinationURL = downloadsDir.appendingPathComponent(fileName)
-            // Remove any existing file at the destination
-            try? FileManager.default.removeItem(at: destinationURL)
-            // Move the downloaded file to ~/Downloads
-            try FileManager.default.moveItem(at: tempURL, to: destinationURL)
-            // Open the DMG — macOS will mount it and show the Finder window
+            // Capture the version string before moving to background
+            let version = latestVersion ?? "latest"
+            // Perform file I/O off the main thread
+            let destinationURL = try await Task.detached {
+                let fileName = "Insomnia-\(version).dmg"
+                let downloadsDir = FileManager.default.urls(
+                    for: .downloadsDirectory,
+                    in: .userDomainMask
+                ).first!
+                let destination = downloadsDir.appendingPathComponent(fileName)
+                // Remove any existing file at the destination
+                try? FileManager.default.removeItem(at: destination)
+                // Move the downloaded file to ~/Downloads
+                try FileManager.default.moveItem(at: tempURL, to: destination)
+                return destination
+            }.value
+            // Open the DMG on the main thread — macOS will mount it
             NSWorkspace.shared.open(destinationURL)
         } catch {
             lastError = "Download failed: \(error.localizedDescription)"
@@ -203,6 +214,25 @@ final class UpdateChecker {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return try decoder.decode(GitHubRelease.self, from: data)
+    }
+
+    /// Validates that a download URL points to an allowed GitHub host.
+    ///
+    /// Only allows HTTPS downloads from GitHub's known asset hosts to prevent
+    /// downloading from spoofed or malicious URLs in a compromised release.
+    ///
+    /// - Parameter url: The download URL to validate.
+    /// - Returns: `true` if the URL uses HTTPS and points to an allowed host.
+    private static func isAllowedDownloadHost(_ url: URL) -> Bool {
+        // Only allow HTTPS downloads
+        guard url.scheme == "https" else { return false }
+        // Allowlisted GitHub asset hosts
+        let allowedHosts = [
+            "github.com",
+            "objects.githubusercontent.com",
+        ]
+        guard let host = url.host else { return false }
+        return allowedHosts.contains(host)
     }
 }
 

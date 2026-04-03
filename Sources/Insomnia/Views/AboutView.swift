@@ -69,11 +69,11 @@ struct AboutView: View {
 
     /// Loads the app icon from the application icon image or Resources directory.
     static func loadIcon() -> NSImage? {
-        // Try the current application icon first
-        if let icon = NSApp.applicationIconImage {
-            return icon
+        // Use the current application icon if the app is running
+        if let app = NSApp {
+            return app.applicationIconImage
         }
-        // Try from current working directory
+        // Try from current working directory as fallback
         let cwdPath = FileManager.default.currentDirectoryPath + "/Resources/AppIcon.icns"
         return NSImage(contentsOfFile: cwdPath)
     }
