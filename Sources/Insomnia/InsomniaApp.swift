@@ -44,6 +44,7 @@ struct InsomniaApp: App {
         Window("Settings", id: "settings") {
             if let viewModel {
                 SettingsView(viewModel: SettingsViewModel(configuration: viewModel.configuration))
+                    .floatingWindow()
             }
         }
         .windowResizability(.contentSize)
@@ -51,6 +52,7 @@ struct InsomniaApp: App {
         // About dialog window — uses BuildEnvironment for variant-aware title
         Window("About \(BuildEnvironment.appName)", id: "about") {
             AboutView()
+                .floatingWindow()
         }
         .windowResizability(.contentSize)
 
@@ -58,6 +60,7 @@ struct InsomniaApp: App {
         Window("Custom Duration", id: "duration-picker") {
             if let viewModel {
                 DurationPickerView(viewModel: viewModel)
+                    .floatingWindow()
             }
         }
         .windowResizability(.contentSize)
@@ -66,6 +69,7 @@ struct InsomniaApp: App {
         Window("Caffeinate Until", id: "time-picker") {
             if let viewModel {
                 TimePickerView(viewModel: viewModel)
+                    .floatingWindow()
             }
         }
         .windowResizability(.contentSize)
@@ -74,6 +78,7 @@ struct InsomniaApp: App {
         Window("Schedules", id: "schedules") {
             if let viewModel {
                 ScheduleEditorView(viewModel: viewModel)
+                    .floatingWindow()
             }
         }
         .windowResizability(.contentSize)
