@@ -13,6 +13,7 @@ import InsomniaCore
 /// - Creates and owns the shared ``CaffeinationScheduler`` used by both
 ///   the GUI and the IPC server
 /// - Starts the ``IPCServer`` on launch so the CLI can communicate
+/// - Starts the ``UpdateChecker`` for periodic GitHub release checks
 /// - Releases all power assertions and stops the IPC server on termination
 final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Shared State
@@ -23,6 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The user configuration shared across the application.
     let configuration = InsomniaConfiguration()
+
+    /// The update checker that periodically queries GitHub for new releases.
+    let updateChecker = UpdateChecker()
 
     // MARK: - Owned Controllers
 
@@ -53,6 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Ensure the app runs as a menu bar-only app (no dock icon)
         NSApp.setActivationPolicy(.accessory)
+
+        // Start periodic update checks (hourly, with an initial check on launch)
+        updateChecker.startPeriodicChecks()
     }
 
     /// Called when the application is about to terminate.
@@ -66,6 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             print("Failed to cancel caffeination on quit: \(error.localizedDescription)")
         }
+
+        // Stop periodic update checks
+        updateChecker.stopPeriodicChecks()
 
         // Stop the IPC server and remove the socket file
         ipcServer?.stop()

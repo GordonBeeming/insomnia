@@ -32,7 +32,7 @@ struct InsomniaApp: App {
         MenuBarExtra {
             // Render the menu content if the view model is ready
             if let viewModel {
-                MenuBarView(viewModel: viewModel)
+                MenuBarView(viewModel: viewModel, updateChecker: appDelegate.updateChecker)
             }
         } label: {
             // Menu bar icon changes based on caffeination state
@@ -82,12 +82,17 @@ struct InsomniaApp: App {
     // MARK: - Menu Bar Label
 
     /// The label displayed in the menu bar — an SF Symbol that changes
-    /// based on the current caffeination state.
+    /// based on the current caffeination state. Shows a down arrow indicator
+    /// when an update is available.
     @ViewBuilder
     private var menuBarLabel: some View {
         if let viewModel {
             // Show coffee cup when awake, moon when sleeping
             Image(systemName: viewModel.menuBarImage)
+            // Show a down arrow indicator when an update is available
+            if appDelegate.updateChecker.isUpdateAvailable {
+                Text("\u{2B07}")
+            }
         } else {
             // Fallback icon before the view model initializes
             Image(systemName: "moon.zzz")

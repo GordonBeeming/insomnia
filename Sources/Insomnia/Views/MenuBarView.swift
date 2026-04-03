@@ -19,6 +19,9 @@ struct MenuBarView: View {
     /// The view model driving all state and actions.
     @Bindable var viewModel: MenuBarViewModel
 
+    /// The update checker for showing update status and triggering checks.
+    var updateChecker: UpdateChecker
+
     /// Environment action to open named windows (About, Duration Picker, etc.).
     @Environment(\.openWindow) private var openWindow
 
@@ -137,7 +140,7 @@ struct MenuBarView: View {
 
     // MARK: - Footer Section
 
-    /// Settings, About, and Quit menu items.
+    /// Settings, About, Update, and Quit menu items.
     private var footerSection: some View {
         Group {
             Button("Settings...") {
@@ -150,9 +153,40 @@ struct MenuBarView: View {
 
             Divider()
 
+            // Update section — shows contextual status and actions
+            updateSection
+
+            Divider()
+
             Button("Quit \(BuildEnvironment.appName)") {
                 // Terminate the application
                 NSApplication.shared.terminate(nil)
+            }
+        }
+    }
+
+    // MARK: - Update Section
+
+    /// Update check status and action buttons.
+    @ViewBuilder
+    private var updateSection: some View {
+        if updateChecker.isUpdateAvailable, let version = updateChecker.latestVersion {
+            // An update is available — show download button
+            if updateChecker.isDownloading {
+                Text("Downloading v\(version)...")
+            } else {
+                Button("Download v\(version)") {
+                    Task { await updateChecker.downloadAndInstall() }
+                }
+            }
+        }
+        if updateChecker.isChecking {
+            // A check is in progress
+            Text("Checking for updates...")
+        } else {
+            // Manual check button
+            Button("Check for Updates") {
+                Task { await updateChecker.checkForUpdate(force: true) }
             }
         }
     }
