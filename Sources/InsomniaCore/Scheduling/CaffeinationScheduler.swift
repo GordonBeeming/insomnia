@@ -57,11 +57,11 @@ public final class CaffeinationScheduler {
     ///
     /// - Parameters:
     ///   - duration: The duration option specifying how long to caffeinate.
-    ///   - type: The assertion type. Defaults to preventing system sleep.
+    ///   - type: The assertion type. Defaults to preventing display sleep.
     /// - Throws: If the power assertion cannot be created.
     public func startTimed(
         _ duration: DurationOption,
-        type: PowerAssertionType = .preventUserIdleSystemSleep
+        type: PowerAssertionType = .preventUserIdleDisplaySleep
     ) throws {
         // Mark as user-initiated (not schedule-activated)
         isScheduleActivated = false
@@ -75,11 +75,11 @@ public final class CaffeinationScheduler {
     ///
     /// - Parameters:
     ///   - date: The date at which caffeination should automatically end.
-    ///   - type: The assertion type. Defaults to preventing system sleep.
+    ///   - type: The assertion type. Defaults to preventing display sleep.
     /// - Throws: If the power assertion cannot be created.
     public func startUntil(
         _ date: Date,
-        type: PowerAssertionType = .preventUserIdleSystemSleep
+        type: PowerAssertionType = .preventUserIdleDisplaySleep
     ) throws {
         // Mark as user-initiated
         isScheduleActivated = false
@@ -98,12 +98,12 @@ public final class CaffeinationScheduler {
     /// - Parameters:
     ///   - bundleIdentifier: The bundle ID of the app to watch (e.g., "com.apple.Xcode").
     ///   - appName: The display name of the app (used in status messages).
-    ///   - type: The assertion type. Defaults to preventing system sleep.
+    ///   - type: The assertion type. Defaults to preventing display sleep.
     /// - Throws: If the power assertion cannot be created.
     public func startWhileAppRunning(
         bundleIdentifier: String,
         appName: String? = nil,
-        type: PowerAssertionType = .preventUserIdleSystemSleep
+        type: PowerAssertionType = .preventUserIdleDisplaySleep
     ) throws {
         // Mark as user-initiated
         isScheduleActivated = false

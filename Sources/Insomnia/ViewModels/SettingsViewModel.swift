@@ -1,8 +1,8 @@
 // SettingsViewModel.swift — Insomnia GUI
 //
 // Bridges the InsomniaConfiguration to SwiftUI settings views by exposing
-// bindable properties and handling side effects like dock icon visibility
-// and launch-at-login registration via SMAppService.
+// bindable properties and handling side effects like launch-at-login
+// registration via SMAppService.
 
 import Foundation
 import SwiftUI
@@ -14,8 +14,8 @@ import ServiceManagement
 /// View model for the Settings window, binding user preferences to the UI.
 ///
 /// Wraps ``InsomniaConfiguration`` and adds side-effect handling for settings
-/// that require AppKit or ServiceManagement calls (dock icon visibility,
-/// launch at login). Uses `@Observable` for SwiftUI integration.
+/// that require ServiceManagement calls (launch at login).
+/// Uses `@Observable` for SwiftUI integration.
 @Observable
 final class SettingsViewModel {
     // MARK: - Dependencies
@@ -46,12 +46,6 @@ final class SettingsViewModel {
         }
     }
 
-    /// Whether to prevent display sleep (in addition to system sleep).
-    var preventDisplaySleep: Bool {
-        get { configuration.preventDisplaySleep }
-        set { configuration.preventDisplaySleep = newValue }
-    }
-
     // MARK: - Appearance Settings
 
     /// The visual style of the menu bar icon.
@@ -72,26 +66,7 @@ final class SettingsViewModel {
         set { configuration.showRemainingTimeInMenuBar = newValue }
     }
 
-    // MARK: - Dock Icon
-
-    /// Whether the dock icon is visible.
-    /// The actual activation policy change is deferred to when Settings closes
-    /// (via onDisappear) to avoid hiding the settings window mid-interaction.
-    var showDockIcon: Bool = false
-
-    // MARK: - Public Helpers
-
-    /// Applies the dock icon visibility setting by changing the activation policy.
-    /// Called when the settings window closes, not on every toggle change.
-    func applyDockIconVisibility() {
-        if showDockIcon {
-            NSApp.setActivationPolicy(.regular)
-            // Reapply the custom icon since macOS resets it on policy change
-            (NSApp.delegate as? AppDelegate)?.reapplyAppIcon()
-        } else {
-            NSApp.setActivationPolicy(.accessory)
-        }
-    }
+    // MARK: - Private Helpers
 
     /// Registers or unregisters the app for launch at login via SMAppService.
     ///

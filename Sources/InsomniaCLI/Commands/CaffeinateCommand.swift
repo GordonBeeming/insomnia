@@ -1,9 +1,9 @@
 // CaffeinateCommand.swift — InsomniaCLI
 //
 // Implements the `insomnia caffeinate` subcommand for starting indefinite
-// caffeination. Supports a --display flag to also prevent display sleep.
-// Operates in two modes: IPC mode (sends command to GUI) and standalone
-// mode (manages power assertions directly when GUI is not running).
+// caffeination. Operates in two modes: IPC mode (sends command to GUI)
+// and standalone mode (manages power assertions directly when GUI is
+// not running). Always prevents both display and system sleep.
 
 import ArgumentParser
 import Foundation
@@ -22,15 +22,6 @@ struct CaffeinateCommand: ParsableCommand {
         // Description shown in help output
         abstract: "Start indefinite caffeination"
     )
-
-    // MARK: - Options
-
-    /// When set, also prevents display sleep in addition to system sleep.
-    ///
-    /// Without this flag, only system sleep is prevented and the display
-    /// may still turn off after the idle timeout.
-    @Flag(name: .long, help: "Also prevent display sleep")
-    var display: Bool = false
 
     // MARK: - Execution
 
@@ -61,15 +52,10 @@ struct CaffeinateCommand: ParsableCommand {
     /// Creates a PowerAssertionManager, starts an indefinite power assertion,
     /// installs a SIGINT handler for clean shutdown, and blocks on the run loop.
     private func runStandalone() throws {
-        // Determine the assertion type based on the --display flag
-        let assertionType: PowerAssertionType = display
-            ? .preventUserIdleDisplaySleep
-            : .preventUserIdleSystemSleep
-
         // Create the power assertion manager with real IOKit provider
         let manager = PowerAssertionManager()
-        // Start the indefinite caffeination assertion
-        try manager.caffeinate(type: assertionType)
+        // Start the indefinite caffeination assertion (prevents display + system sleep)
+        try manager.caffeinate()
 
         // Display the standalone mode banner with current state
         CLIOutput.printStandalone(state: manager.state)

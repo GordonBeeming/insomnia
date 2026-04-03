@@ -85,14 +85,14 @@ public struct ScheduleRule: Codable, Identifiable, Equatable, Sendable {
     ///   - startTime: The start time (hour/minute) of the caffeination window.
     ///   - endTime: The end time (hour/minute) of the caffeination window.
     ///   - isEnabled: Whether the rule is active. Defaults to `true`.
-    ///   - assertionType: The assertion type. Defaults to preventing system sleep.
+    ///   - assertionType: The assertion type. Defaults to preventing display sleep.
     public init(
         id: UUID = UUID(),
         weekdays: Set<Weekday>,
         startTime: DateComponents,
         endTime: DateComponents,
         isEnabled: Bool = true,
-        assertionType: PowerAssertionType = .preventUserIdleSystemSleep
+        assertionType: PowerAssertionType = .preventUserIdleDisplaySleep
     ) {
         self.id = id
         self.weekdays = weekdays

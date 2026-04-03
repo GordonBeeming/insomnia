@@ -158,9 +158,9 @@ public final class PowerAssertionManager {
     ///
     /// If already caffeinated, the existing assertion is released first.
     ///
-    /// - Parameter type: The type of sleep to prevent. Defaults to preventing system sleep.
+    /// - Parameter type: The type of sleep to prevent. Defaults to preventing display sleep.
     /// - Throws: If the IOKit assertion cannot be created.
-    public func caffeinate(type: PowerAssertionType = .preventUserIdleSystemSleep) throws {
+    public func caffeinate(type: PowerAssertionType = .preventUserIdleDisplaySleep) throws {
         // Release any existing assertion before creating a new one
         try releaseExistingAssertion()
         // Create the new assertion via the provider
@@ -181,9 +181,9 @@ public final class PowerAssertionManager {
     ///
     /// - Parameters:
     ///   - duration: The duration in seconds to keep the assertion active.
-    ///   - type: The type of sleep to prevent. Defaults to preventing system sleep.
+    ///   - type: The type of sleep to prevent. Defaults to preventing display sleep.
     /// - Throws: If the IOKit assertion cannot be created.
-    public func caffeinate(for duration: TimeInterval, type: PowerAssertionType = .preventUserIdleSystemSleep) throws {
+    public func caffeinate(for duration: TimeInterval, type: PowerAssertionType = .preventUserIdleDisplaySleep) throws {
         // Calculate the end date from the duration
         let endDate = Date().addingTimeInterval(duration)
         // Delegate to the until-date method
@@ -197,9 +197,9 @@ public final class PowerAssertionManager {
     ///
     /// - Parameters:
     ///   - date: The date at which to automatically decaffeinate.
-    ///   - type: The type of sleep to prevent. Defaults to preventing system sleep.
+    ///   - type: The type of sleep to prevent. Defaults to preventing display sleep.
     /// - Throws: If the IOKit assertion cannot be created.
-    public func caffeinate(until date: Date, type: PowerAssertionType = .preventUserIdleSystemSleep) throws {
+    public func caffeinate(until date: Date, type: PowerAssertionType = .preventUserIdleDisplaySleep) throws {
         // Release any existing assertion before creating a new one
         try releaseExistingAssertion()
         // Create the new assertion via the provider
@@ -220,9 +220,9 @@ public final class PowerAssertionManager {
     /// If currently decaffeinated, starts indefinite caffeination.
     /// If currently caffeinated (any mode), decaffeinates.
     ///
-    /// - Parameter type: The assertion type to use when toggling on. Defaults to system sleep.
+    /// - Parameter type: The assertion type to use when toggling on. Defaults to display sleep.
     /// - Throws: If creating or releasing the assertion fails.
-    public func toggle(type: PowerAssertionType = .preventUserIdleSystemSleep) throws {
+    public func toggle(type: PowerAssertionType = .preventUserIdleDisplaySleep) throws {
         if state.isActive {
             // Currently active — turn off
             try decaffeinate()
@@ -253,12 +253,12 @@ public final class PowerAssertionManager {
     /// - Parameters:
     ///   - bundleIdentifier: The bundle ID of the watched application.
     ///   - appName: The display name of the watched application.
-    ///   - type: The assertion type. Defaults to preventing system sleep.
+    ///   - type: The assertion type. Defaults to preventing display sleep.
     /// - Throws: If the IOKit assertion cannot be created.
     public func caffeinateWhileRunning(
         bundleIdentifier: String,
         appName: String,
-        type: PowerAssertionType = .preventUserIdleSystemSleep
+        type: PowerAssertionType = .preventUserIdleDisplaySleep
     ) throws {
         // Release any existing assertion before creating a new one
         try releaseExistingAssertion()

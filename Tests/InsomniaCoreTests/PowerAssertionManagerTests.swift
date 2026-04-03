@@ -111,18 +111,11 @@ final class PowerAssertionManagerTests: XCTestCase {
         // Verify state transition
         XCTAssertEqual(manager.state, .caffeinatedIndefinitely)
         XCTAssertTrue(manager.state.isActive)
-        XCTAssertEqual(manager.currentAssertionType, .preventUserIdleSystemSleep)
+        XCTAssertEqual(manager.currentAssertionType, .preventUserIdleDisplaySleep)
         // Verify the mock was called
         XCTAssertEqual(mockProvider.createCallCount, 1)
         XCTAssertEqual(mockProvider.activeAssertions.count, 1)
-    }
-
-    /// Tests caffeination with display sleep prevention type.
-    func testCaffeinateWithDisplaySleepType() throws {
-        // Caffeinate with display sleep type
-        try manager.caffeinate(type: .preventUserIdleDisplaySleep)
-        // Verify the correct assertion type was used
-        XCTAssertEqual(manager.currentAssertionType, .preventUserIdleDisplaySleep)
+        // Verify the correct IOKit assertion type was used
         XCTAssertEqual(mockProvider.lastAssertionType, PowerAssertionType.preventUserIdleDisplaySleep.iokitAssertionType)
     }
 

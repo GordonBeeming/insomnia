@@ -19,6 +19,9 @@ struct MenuBarView: View {
     /// The view model driving all state and actions.
     @Bindable var viewModel: MenuBarViewModel
 
+    /// The update checker for showing update status and triggering checks.
+    var updateChecker: UpdateChecker
+
     /// Environment action to open named windows (About, Duration Picker, etc.).
     @Environment(\.openWindow) private var openWindow
 
@@ -137,7 +140,7 @@ struct MenuBarView: View {
 
     // MARK: - Footer Section
 
-    /// Settings, About, and Quit menu items.
+    /// Settings, About, Update, and Quit menu items.
     private var footerSection: some View {
         Group {
             Button("Settings...") {
@@ -150,6 +153,11 @@ struct MenuBarView: View {
 
             Divider()
 
+            // Update section — shows contextual status and actions
+            updateSection
+
+            Divider()
+
             Button("Quit \(BuildEnvironment.appName)") {
                 // Terminate the application
                 NSApplication.shared.terminate(nil)
@@ -157,15 +165,46 @@ struct MenuBarView: View {
         }
     }
 
+    // MARK: - Update Section
+
+    /// Update check status and action buttons.
+    @ViewBuilder
+    private var updateSection: some View {
+        if updateChecker.isUpdateAvailable, let version = updateChecker.latestVersion {
+            // An update is available — show download or release link
+            if updateChecker.isDownloading {
+                Text("Downloading v\(version)...")
+            } else if updateChecker.downloadURL != nil {
+                // DMG available — offer direct download
+                Button("Download v\(version)") {
+                    Task { await updateChecker.downloadAndInstall() }
+                }
+            } else {
+                // Update exists but no DMG asset — show version info only
+                Text("v\(version) available on GitHub")
+            }
+        }
+        // Show error from the last check or download, if any
+        if let error = updateChecker.lastError {
+            Text(error)
+        }
+        if updateChecker.isChecking {
+            // A check is in progress
+            Text("Checking for updates...")
+        } else {
+            // Manual check button
+            Button("Check for Updates") {
+                Task { await updateChecker.checkForUpdate(force: true) }
+            }
+        }
+    }
+
     // MARK: - Helpers
 
-    /// Switches to regular activation policy, opens a window, reapplies the app icon,
-    /// and activates the app so the window appears in front.
+    /// Opens a window and activates the app so the window appears in front.
+    /// The app stays in accessory mode (no dock icon) since LSUIElement is set.
     private func activateAndOpen(windowId: String) {
-        NSApp.setActivationPolicy(.regular)
         openWindow(id: windowId)
-        // Reapply the cached icon since macOS resets it when switching activation policies
-        (NSApp.delegate as? AppDelegate)?.reapplyAppIcon()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
