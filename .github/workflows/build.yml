@@ -198,10 +198,16 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           DMG="Distribution/Insomnia-${VERSION}.dmg"
+          DMG_ROOT="${RUNNER_TEMP}/insomnia-dmg"
+
+          rm -rf "${DMG_ROOT}"
+          mkdir -p "${DMG_ROOT}"
+          ditto Distribution/Insomnia.app "${DMG_ROOT}/Insomnia.app"
+          ln -s /Applications "${DMG_ROOT}/Applications"
 
           hdiutil create \
             -volname "Insomnia" \
-            -srcfolder Distribution/Insomnia.app \
+            -srcfolder "${DMG_ROOT}" \
             -ov \
             -format UDZO \
             "${DMG}"
