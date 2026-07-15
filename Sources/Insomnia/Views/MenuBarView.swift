@@ -177,7 +177,7 @@ struct MenuBarView: View {
             } else if updateChecker.downloadURL != nil {
                 // DMG available — offer direct download
                 Button("Download v\(version)") {
-                    Task { await updateChecker.downloadAndInstall() }
+                    Task { await updateChecker.downloadAndOpenInstaller() }
                 }
             } else {
                 // Update exists but no DMG asset — show version info only

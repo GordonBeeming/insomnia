@@ -151,14 +151,14 @@ final class UpdateChecker {
         }
     }
 
-    // MARK: - Download and Install
+    // MARK: - Download Update
 
     /// Downloads the latest DMG and opens it for the user to install.
     ///
     /// The DMG is saved to `~/Downloads` and automatically mounted
     /// via `NSWorkspace` so the user can drag the app to Applications.
     /// File I/O is performed off the main thread to avoid UI jank.
-    func downloadAndInstall() async {
+    func downloadAndOpenInstaller() async {
         guard let url = downloadURL else {
             lastError = "No download URL available"
             return
