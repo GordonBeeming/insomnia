@@ -164,6 +164,26 @@ jobs:
             --sign "Developer ID Application" \
             Distribution/insomnia
 
+      # --- Notarize and staple the .app ---------------------------------------
+      # Keep the app's own ticket available after it is copied out of the DMG.
+      - name: Notarize application
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent Distribution/Insomnia.app Distribution/Insomnia-notarize.zip
+
+          xcrun notarytool submit Distribution/Insomnia-notarize.zip \
+            --apple-id "${APPLE_ID}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --password "${APPLE_APP_PASSWORD}" \
+            --wait
+
+          rm Distribution/Insomnia-notarize.zip
+          xcrun stapler staple Distribution/Insomnia.app
+          xcrun stapler validate Distribution/Insomnia.app
+
       # --- Create, sign, and notarize DMG -------------------------------------
       # Notarize the final distribution artifact so Gatekeeper can verify both
       # the disk image and the signed application it contains.
