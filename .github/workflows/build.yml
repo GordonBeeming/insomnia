@@ -164,10 +164,30 @@ jobs:
             --sign "Developer ID Application" \
             Distribution/insomnia
 
-      # --- Notarize the .app --------------------------------------------------
-      # Apple notarization scans the binary for malware and issues a ticket.
-      # Without notarization, macOS Gatekeeper blocks the app on first launch.
+      # --- Notarize and staple the .app ---------------------------------------
+      # Keep the app's own ticket available after it is copied out of the DMG.
       - name: Notarize application
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent Distribution/Insomnia.app Distribution/Insomnia-notarize.zip
+
+          xcrun notarytool submit Distribution/Insomnia-notarize.zip \
+            --apple-id "${APPLE_ID}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --password "${APPLE_APP_PASSWORD}" \
+            --wait
+
+          rm Distribution/Insomnia-notarize.zip
+          xcrun stapler staple Distribution/Insomnia.app
+          xcrun stapler validate Distribution/Insomnia.app
+
+      # --- Create, sign, and notarize DMG -------------------------------------
+      # Notarize the final distribution artifact so Gatekeeper can verify both
+      # the disk image and the signed application it contains.
+      - name: Create, sign, and notarize DMG
         env:
           # Apple Developer account email
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -176,47 +196,32 @@ jobs:
           # App-specific password for notarytool authentication
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
-          # Create a zip of the .app for upload to Apple's notary service
-          # (notarytool accepts .zip, .dmg, or .pkg)
-          ditto -c -k --keepParent Distribution/Insomnia.app Distribution/Insomnia-notarize.zip
-
-          # Submit to Apple's notary service and wait for the result
-          # --wait blocks until Apple finishes scanning (usually 2-10 minutes)
-          xcrun notarytool submit Distribution/Insomnia-notarize.zip \
-            --apple-id "${APPLE_ID}" \
-            --team-id "${APPLE_TEAM_ID}" \
-            --password "${APPLE_APP_PASSWORD}" \
-            --wait
-
-          # Clean up the temporary zip — we'll create a DMG for distribution
-          rm Distribution/Insomnia-notarize.zip
-
-      # --- Staple the notarization ticket ------------------------------------
-      # Stapling embeds the notarization ticket directly in the .app bundle.
-      # This allows Gatekeeper to verify offline without contacting Apple's servers.
-      - name: Staple notarization ticket
-        run: |
-          xcrun stapler staple Distribution/Insomnia.app
-
-      # --- Create DMG ---------------------------------------------------------
-      # Package the .app into a DMG disk image for end-user distribution.
-      # DMGs are the standard macOS distribution format for non-App Store apps.
-      - name: Create DMG
-        run: |
-          # Extract the version from the release tag (e.g., "v1.2.0" → "1.2.0")
           VERSION="${GITHUB_REF_NAME#v}"
+          DMG="Distribution/Insomnia-${VERSION}.dmg"
 
-          # hdiutil creates the disk image:
-          # -volname     → name shown when the DMG is mounted in Finder
-          # -srcfolder   → directory containing the .app to include
-          # -ov          → overwrite if the DMG already exists
-          # -format UDZO → compressed read-only image (standard for distribution)
           hdiutil create \
             -volname "Insomnia" \
             -srcfolder Distribution/Insomnia.app \
             -ov \
             -format UDZO \
-            "Distribution/Insomnia-${VERSION}.dmg"
+            "${DMG}"
+
+          codesign --force \
+            --timestamp \
+            --sign "Developer ID Application" \
+            "${DMG}"
+          codesign --verify --verbose=2 "${DMG}"
+
+          xcrun notarytool submit "${DMG}" \
+            --apple-id "${APPLE_ID}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --password "${APPLE_APP_PASSWORD}" \
+            --wait
+
+          xcrun stapler staple "${DMG}"
+          xcrun stapler validate "${DMG}"
+          hdiutil verify "${DMG}"
+          spctl -a -t open --context context:primary-signature -vv "${DMG}"
 
       # --- Package CLI for Homebrew -------------------------------------------
       # Create a tar.gz archive of the CLI binary for Homebrew formula distribution
