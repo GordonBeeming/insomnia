@@ -158,6 +158,7 @@ final class UpdateChecker {
     /// The DMG is saved to `~/Downloads` and automatically mounted
     /// via `NSWorkspace` so the user can drag the app to Applications.
     /// File I/O is performed off the main thread to avoid UI jank.
+    @MainActor
     func downloadAndOpenInstaller() async {
         guard let url = downloadURL else {
             lastError = "No download URL available"
