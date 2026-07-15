@@ -200,6 +200,7 @@ jobs:
           DMG="Distribution/Insomnia-${VERSION}.dmg"
           DMG_ROOT="${RUNNER_TEMP}/insomnia-dmg"
 
+          rm -rf "${DMG_ROOT}"
           mkdir -p "${DMG_ROOT}"
           ditto Distribution/Insomnia.app "${DMG_ROOT}/Insomnia.app"
           ln -s /Applications "${DMG_ROOT}/Applications"
