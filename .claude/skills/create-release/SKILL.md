@@ -16,28 +16,29 @@ Create a new GitHub release for Insomnia with the correct versioning.
    ```
 3. Bump the minor version (e.g., v0.2 → v0.3). Never use a patch number in the tag.
 4. Create the release:
-   ```bash
-   gh release create v{major}.{minor} \
-     --repo gordonbeeming/insomnia \
-     --target main \
-     --title "v{major}.{minor} — {short description}" \
-     --notes "$(cat <<'EOF'
-   # Insomnia v{major}.{minor} — {short description}
 
-   ## What's New
+````bash
+gh release create v{major}.{minor} \
+  --repo gordonbeeming/insomnia \
+  --target main \
+  --title "v{major}.{minor} — {short description}" \
+  --notes "$(cat <<'EOF'
+# Insomnia v{major}.{minor} — {short description}
 
-   - {list changes since last release using git log}
+## What's New
 
-   ## Install
+- {list changes since last release using git log}
 
-   ```bash
-   brew upgrade --cask gordonbeeming/tap/insomnia
-   ```
+## Install
 
-   Or download the DMG and CLI binary from the assets below.
-   EOF
-   )"
-   ```
+```bash
+brew upgrade --cask gordonbeeming/tap/insomnia
+```
+
+Or download the DMG and CLI binary from the assets below.
+EOF
+)"
+````
 5. The release pipeline will automatically:
    - Build + test
    - Sign with Developer ID
