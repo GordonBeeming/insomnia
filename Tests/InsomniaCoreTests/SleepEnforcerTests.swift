@@ -406,6 +406,99 @@ final class ForeignAssertionTests: XCTestCase {
         XCTAssertFalse(parsed.contains { $0.pid == 30 || $0.pid == 40 })
     }
 
+    func testParseFiltersPowerdNamedInTableWhenProcNameUnavailable() {
+        // A notarized app can't proc_name root daemons, but the assertion dict names the holder.
+        let table: [NSNumber: [[String: Any]]] = [
+            571: [["AssertType": "PreventUserIdleSystemSleep", "AssertName": "Powerd - Prevent sleep while display is on",
+                   "Process Name": "powerd"]],
+        ]
+        let parsed = IOKitForeignAssertionReader.parse(
+            table, ownPid: 1, nameOf: { _ in nil }, parentOf: { _ in nil }, displayNameOf: { _ in nil }
+        )
+        XCTAssertTrue(parsed.isEmpty)
+    }
+
+    func testParseUsesTableNameAndOnBehalfOfApp() {
+        let assertionStart = Date(timeIntervalSince1970: 2_000_000)
+        let table: [NSNumber: [[String: Any]]] = [
+            634: [["AssertType": "PreventUserIdleSystemSleep", "AssertName": "ClaudeBar", "Process Name": "runningboardd",
+                   "AssertionOnBehalfOfPID": 14916, "AssertStartWhen": assertionStart]],
+            700: [["AssertType": "PreventUserIdleSystemSleep", "AssertName": "x", "Process Name": "sharingd"]],
+        ]
+        let names: [Int32: String] = [14916: "ClaudeBar"]
+        let parsed = IOKitForeignAssertionReader.parse(
+            table, ownPid: 1, nameOf: { names[$0] }, parentOf: { _ in nil }, displayNameOf: { names[$0] },
+            startDateOf: { _ in assertionStart.addingTimeInterval(-60) }
+        )
+        let board = parsed.first { $0.pid == 634 }
+        XCTAssertEqual(board?.processName, "runningboardd")
+        XCTAssertEqual(board?.owningAppName, "ClaudeBar")
+        // No name lookup works for pid 700, so the table's name is used rather than "pid 700".
+        XCTAssertEqual(parsed.first { $0.pid == 700 }?.owningAppName, "sharingd")
+    }
+
+    /// Parses one runningboardd assertion made on behalf of pid 14916, given the beneficiary's start time and the assertion's.
+    private func parseOnBehalf(assertionStart: Date?, processStart: Date?) -> ForeignAssertion? {
+        var entry: [String: Any] = ["AssertType": "PreventUserIdleSystemSleep", "AssertName": "x",
+                                    "Process Name": "runningboardd", "AssertionOnBehalfOfPID": 14916]
+        if let assertionStart { entry["AssertStartWhen"] = assertionStart }
+        let names: [Int32: String] = [14916: "ClaudeBar"]
+        return IOKitForeignAssertionReader.parse(
+            [634: [entry]], ownPid: 1, nameOf: { names[$0] }, parentOf: { _ in nil }, displayNameOf: { names[$0] },
+            startDateOf: { _ in processStart }
+        ).first
+    }
+
+    func testOnBehalfAttributionRequiresBeneficiaryStartedBeforeAssertion() {
+        let assertion = Date(timeIntervalSince1970: 2_000_000)
+        XCTAssertEqual(parseOnBehalf(assertionStart: assertion, processStart: assertion.addingTimeInterval(-5))?.owningAppName,
+                       "ClaudeBar", "beneficiary predates the assertion: trusted")
+        // The pid was reused after the assertion: the name would belong to an unrelated process.
+        XCTAssertEqual(parseOnBehalf(assertionStart: assertion, processStart: assertion.addingTimeInterval(5))?.owningAppName,
+                       "runningboardd")
+    }
+
+    func testOnBehalfAttributionFallsBackWhenATimestampIsMissing() {
+        let assertion = Date(timeIntervalSince1970: 2_000_000)
+        XCTAssertEqual(parseOnBehalf(assertionStart: nil, processStart: assertion)?.owningAppName, "runningboardd")
+        XCTAssertEqual(parseOnBehalf(assertionStart: assertion, processStart: nil)?.owningAppName, "runningboardd")
+    }
+
+    func testTableOnlyExemptHoldersEachPreventSleepAndStayOutOfMenu() {
+        // proc_name can't name root daemons in the notarized app, so only the table's "Process Name" identifies them.
+        let table: [NSNumber: [[String: Any]]] = [
+            100: [["AssertType": "PreventUserIdleSystemSleep", "AssertName": "claude", "Process Name": "claude"]],
+            200: [["AssertType": "PreventUserIdleSystemSleep", "AssertName": "audio", "Process Name": "coreaudiod"]],
+            300: [["AssertType": "BackgroundTask", "AssertName": "backup", "Process Name": "backupd"]],
+        ]
+        let parsed = IOKitForeignAssertionReader.parse(
+            table, ownPid: 1, nameOf: { _ in nil }, parentOf: { _ in nil }, displayNameOf: { _ in nil }
+        )
+        func input(_ holders: [ForeignAssertion]) -> EnforcerInput {
+            EnforcerInput(isCaffeinated: false, settingEnabled: true, idleSeconds: 1200, secondsSinceWake: 5000,
+                          thresholdSeconds: 600, displayAsleep: true, holders: holders, caffeinatePids: [])
+        }
+        let claude = parsed.filter { $0.pid == 100 }
+        XCTAssertTrue(SleepEnforcer.shouldSleep(input(claude)), "control: a lone blocker does sleep")
+        for exemptPid in [Int32(200), 300] {
+            let withExempt = claude + parsed.filter { $0.pid == exemptPid }
+            XCTAssertFalse(SleepEnforcer.shouldSleep(input(withExempt)), "pid \(exemptPid) should prevent sleep")
+            XCTAssertEqual(SleepEnforcer.decide(input(withExempt)), [])
+        }
+        let rows = ForeignHolderSummary.rows(for: parsed)
+        XCTAssertFalse(rows.contains { $0.contains("backupd") }, "BackgroundTask stays out of the menu")
+    }
+
+    func testRowsCollapseWhenProcessIsTheApp() {
+        let selfNamed = ForeignAssertion(pid: 1, processName: "sharingd", owningAppName: "sharingd",
+                                         type: "PreventUserIdleSystemSleep", name: "")
+        let onBehalf = ForeignAssertion(pid: 2, processName: "runningboardd", owningAppName: "ClaudeBar",
+                                        type: "PreventUserIdleSystemSleep", name: "")
+        XCTAssertEqual(ForeignHolderSummary.rows(for: [selfNamed, onBehalf]),
+                       ["sharingd (prevent idle sleep)", "ClaudeBar \u{2014} runningboardd (prevent idle sleep)"])
+        XCTAssertEqual(ForeignHolderSummary.groupCount(for: [selfNamed, onBehalf]), 2)
+    }
+
     func testSummaryHidesNonBlockingTypes() {
         let task = ForeignAssertion(pid: 7, processName: "backupd", owningAppName: "backupd",
                                     type: "BackgroundTask", name: "backup")

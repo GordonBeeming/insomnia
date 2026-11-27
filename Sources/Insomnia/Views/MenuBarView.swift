@@ -73,15 +73,17 @@ struct MenuBarView: View {
 
     // MARK: - Foreign Holders Section
 
-    /// Disabled rows listing other apps that keep the Mac awake; hidden when there are none.
+    /// A submenu listing other apps that keep the Mac awake; hidden when there are none.
+    /// The count is of apps (rows before any "+N more"), so the title stays honest.
     @ViewBuilder
     private var foreignHoldersSection: some View {
         let rows = viewModel.foreignHolderRows
         if !rows.isEmpty {
             Divider()
-            Text("Also keeping your Mac awake:")
-            ForEach(rows, id: \.self) { row in
-                Text(row)
+            Menu("Also keeping your Mac awake (\(viewModel.foreignHolderCount))") {
+                ForEach(rows, id: \.self) { row in
+                    Text(row)
+                }
             }
         }
     }
