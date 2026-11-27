@@ -53,12 +53,18 @@ swift run InsomniaCLI status                       # run CLI
 
 ## Updating a dev's machine to a new release
 
-Restarting Insomnia drops its power assertion. If it was caffeinated, the Mac can idle-sleep and stop whatever the dev left running. So before `brew upgrade` or any restart:
+Restarting Insomnia drops its power assertion. If it was caffeinated and the dev has been idle past the sleep timer, the Mac sleeps the moment the old app quits, and whatever they left running stops. Every upgrade or restart therefore goes like this:
 
-1. Record the state: `insomnia status --json` (indefinite, until a time, or while an app runs).
-2. Upgrade, then quit the old app cleanly (`kill -TERM`, wait for it to exit) and open the new one.
-3. Put the same state back with the CLI: `insomnia caffeinate`, `insomnia until <HH:MM>`, or `insomnia while <app>`. A timed session resumes with the same end time.
-4. Run `insomnia status` again and confirm it matches before saying the install is done.
+1. **Record the state.** Run `insomnia status --json` and keep `state`, `isActive`, `remainingSeconds` and `schedulesCount`. It must say `"guiRunning": true`; if it doesn't, the snapshot means nothing, so stop and ask.
+2. **Upgrade.** `brew upgrade --cask gordonbeeming/tap/insomnia`. Always use the full cask name, because an unrelated `insomnia` cask exists.
+3. **Bridge the gap, if `isActive` was true.** Quit the old app (`osascript -e 'tell application id "com.gordonbeeming.insomnia" to quit'`) and wait for its process to exit. Then start `insomnia caffeinate &` right away. With no app running, the CLI runs standalone and holds its own assertion until it's killed. The enforcer never touches it, because it only ends `/usr/bin/caffeinate`.
+4. **Start the new app.** `open -a /Applications/Insomnia.app`, then poll `insomnia status --json` until `guiRunning` is true. A restore sent before then runs standalone, where `status` can't see it.
+5. **Restore through the app:**
+   - Indefinite: `insomnia caffeinate`.
+   - Timed: `insomnia for <remainingSeconds, rounded up to a whole minute>`. Don't use `until`: it drops seconds and moves a time that has already passed to tomorrow. If the session had already expired, don't restore anything.
+   - While an app runs: `insomnia while <bundle id>`, and only if that app is still running. Otherwise leave Insomnia decaffeinated.
+   - If `schedulesCount` was above 0, the active state may have come from a schedule. Check that the schedules survived the restart instead of replaying the state by hand.
+6. **End the bridge.** Kill the standalone `insomnia caffeinate` from step 3. Then run `insomnia status` again and confirm it matches step 1 before saying the install is done.
 
 Never run `/Applications/Insomnia.app/Contents/MacOS/insomnia`. The filesystem is case-insensitive, so that path is the GUI binary: it starts a second app that takes over the IPC socket. Use `insomnia` from the PATH, which is the CLI.
 
