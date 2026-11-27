@@ -138,6 +138,10 @@ public final class PowerAssertionManager {
     /// Fires when the caffeination period expires.
     private var expiryTimer: Timer?
 
+    /// Called at the end of every `decaffeinate()`, whichever path ended caffeination
+    /// (timer, app quit, schedule, IPC, menu), so the SleepEnforcer can sweep immediately.
+    @ObservationIgnored public var onDecaffeinated: (() -> Void)?
+
     /// The provider used to create and release IOKit assertions.
     /// Injected for testability — defaults to real IOKit calls.
     private let provider: PowerAssertionProviding
@@ -243,6 +247,8 @@ public final class PowerAssertionManager {
         // Reset state to decaffeinated
         state = .decaffeinated
         currentAssertionType = nil
+        // Notify last so listeners see the final decaffeinated state
+        onDecaffeinated?()
     }
 
     /// Updates the state to reflect app-watching mode.

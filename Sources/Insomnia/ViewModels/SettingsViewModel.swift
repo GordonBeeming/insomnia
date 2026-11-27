@@ -46,6 +46,12 @@ final class SettingsViewModel {
         }
     }
 
+    /// Whether Insomnia ends other apps' caffeinate and sleeps the Mac when idle, while decaffeinated.
+    var onlyInsomniaKeepsAwake: Bool {
+        get { configuration.onlyInsomniaKeepsAwake }
+        set { configuration.onlyInsomniaKeepsAwake = newValue }
+    }
+
     // MARK: - Appearance Settings
 
     /// The visual style of the menu bar icon.
