@@ -56,6 +56,11 @@ final class MenuBarViewModel {
     }
 
     /// Menu rows for the "Also keeping your Mac awake" section; empty hides the section.
+    var foreignHolderCount: Int {
+        ForeignHolderSummary.groupCount(for: foreignHolders)
+    }
+
+    /// Menu rows for the "Also keeping your Mac awake" submenu; empty hides it.
     var foreignHolderRows: [String] {
         ForeignHolderSummary.rows(for: foreignHolders)
     }

@@ -265,6 +265,11 @@ public final class IOKitForeignAssertionReader: ForeignAssertionReading, @unchec
         )
     }
 
+    /// Key in each assertion dictionary naming the holding process.
+    static let processNameKey = "Process Name"
+    /// Key naming the pid an assertion was taken on behalf of (e.g. by runningboardd for an app).
+    static let onBehalfOfPidKey = "AssertionOnBehalfOfPID"
+
     /// Pure parse of the IOKit table; process lookups are injected so tests can feed fixtures.
     static func parse(
         _ table: [NSNumber: [[String: Any]]],
@@ -277,13 +282,25 @@ public final class IOKitForeignAssertionReader: ForeignAssertionReading, @unchec
         for (pidNumber, assertions) in table {
             let pid = pidNumber.int32Value
             if pid == ownPid { continue }
-            let processName = nameOf(pid) ?? "pid \(pid)"
+            // The assertion table carries the holder's name itself. A notarized app can't proc_name
+            // root daemons (powerd, runningboardd), so that lookup is only the fallback.
+            let processName = assertions.compactMap { $0[processNameKey] as? String }.first
+                ?? nameOf(pid) ?? "pid \(pid)"
             // System policy holders (powerd) never reach the menu or the enforcer.
             if ForeignAssertion.systemPolicyProcessNames.contains(processName) { continue }
-            let owner = OwningAppResolver.resolve(pid: pid, parentOf: parentOf, nameOf: displayNameOf)
+            let holderOwner = OwningAppResolver.resolve(pid: pid, parentOf: parentOf, nameOf: displayNameOf)
             for assertion in assertions {
                 guard let type = assertion[kIOPMAssertionTypeKey as String] as? String else { continue }
                 let name = assertion[kIOPMAssertionNameKey as String] as? String ?? ""
+                // runningboardd and friends hold assertions on behalf of an app; that app is who the user cares about.
+                var owner = holderOwner
+                if let behalf = (assertion[onBehalfOfPidKey] as? NSNumber)?.int32Value, behalf > 0,
+                   displayNameOf(behalf) != nil {
+                    owner = OwningAppResolver.resolve(pid: behalf, parentOf: parentOf, nameOf: displayNameOf)
+                } else if holderOwner.hasPrefix("pid ") {
+                    // Neither lookup could name the holder; the table's own name beats "pid N".
+                    owner = processName
+                }
                 found.append(ForeignAssertion(
                     pid: pid, processName: processName, owningAppName: owner, type: type, name: name
                 ))
@@ -297,25 +314,36 @@ public final class IOKitForeignAssertionReader: ForeignAssertionReading, @unchec
 
 /// Turns holders into the short rows the menu shows.
 public enum ForeignHolderSummary {
+    /// Idle-blocking holders grouped by owning app, in first-seen order.
+    /// The menu lists only what can block idle sleep; other types (backup tasks etc.) are not "keeping it awake".
+    private static func groups(for holders: [ForeignAssertion]) -> [(app: String, items: [ForeignAssertion])] {
+        var order: [String] = []
+        var grouped: [String: [ForeignAssertion]] = [:]
+        for holder in holders where holder.blocksIdleSleep {
+            if grouped[holder.owningAppName] == nil { order.append(holder.owningAppName) }
+            grouped[holder.owningAppName, default: []].append(holder)
+        }
+        return order.map { ($0, grouped[$0] ?? []) }
+    }
+
+    /// The number of distinct apps keeping the Mac awake (what the menu title counts).
+    public static func groupCount(for holders: [ForeignAssertion]) -> Int {
+        groups(for: holders).count
+    }
+
     /// Groups holders by owning app and caps the list.
     ///
     /// - Parameters:
     ///   - holders: Assertions to summarise.
     ///   - limit: Maximum rows before collapsing the rest into "+N more".
-    /// - Returns: One row per app (e.g. `claude — caffeinate (prevent idle sleep)`) plus an optional overflow row.
+    /// - Returns: One row per app (e.g. `ClaudeBar — runningboardd (prevent idle sleep)`; just
+    ///   `sharingd (prevent idle sleep)` when the process is the app itself) plus an optional overflow row.
     public static func rows(for holders: [ForeignAssertion], limit: Int = 5) -> [String] {
-        var order: [String] = []
-        var grouped: [String: [ForeignAssertion]] = [:]
-        // The menu lists only what can block idle sleep; other types (backup tasks etc.) are not "keeping it awake".
-        for holder in holders where holder.blocksIdleSleep {
-            if grouped[holder.owningAppName] == nil { order.append(holder.owningAppName) }
-            grouped[holder.owningAppName, default: []].append(holder)
-        }
-        let lines: [String] = order.map { app in
-            let items = grouped[app] ?? []
-            let processes = Set(items.map(\.processName)).sorted().joined(separator: ", ")
-            let kinds = Set(items.map(\.typeDescription)).sorted().joined(separator: ", ")
-            return "\(app) \u{2014} \(processes) (\(kinds))"
+        let lines: [String] = groups(for: holders).map { group in
+            let processes = Set(group.items.map(\.processName)).sorted().joined(separator: ", ")
+            let kinds = Set(group.items.map(\.typeDescription)).sorted().joined(separator: ", ")
+            // Repeating the name ("sharingd — sharingd") says nothing, so collapse it.
+            return processes == group.app ? "\(group.app) (\(kinds))" : "\(group.app) \u{2014} \(processes) (\(kinds))"
         }
         guard lines.count > limit else { return lines }
         return Array(lines.prefix(limit)) + ["+\(lines.count - limit) more"]
