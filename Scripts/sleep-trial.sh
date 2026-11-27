@@ -125,22 +125,47 @@ cmd_report() {
   printf 'Elapsed:  %dh %02dm %02ds\n' $((elapsed / 3600)) $(((elapsed % 3600) / 60)) $((elapsed % 60))
   echo "Battery:  ${battery_percent}% -> ${battery_now}%  (drop: ${drop})"
 
-  # pmset log lines start with "YYYY-MM-DD HH:MM:SS +ZZZZ"; compare as strings against the start time.
-  local lines
-  lines="$(pmset -g log | awk -v since="$start_local" '
-    / DarkWake[ \t]+DarkWake from / && substr($0,1,19) >= since { print }
-  ')"
+  # pmset log lines start with "YYYY-MM-DD HH:MM:SS +ZZZZ". Convert each to epoch seconds (offset included)
+  # so the comparison is correct across timezone and DST changes, instead of comparing local strings.
+  local start_day="${start_local%% *}"
+  local -a dark_lines=()
+  local full_wake_epoch=""
+  local line stamp epoch
+  while IFS= read -r line; do
+    stamp="${line:0:25}"
+    epoch="$(date -j -f '%Y-%m-%d %H:%M:%S %z' "$stamp" +%s 2>/dev/null || true)"
+    [[ "$epoch" =~ ^[0-9]+$ ]] || continue
+    (( epoch >= start_epoch )) || continue
+    if [[ "$line" =~ [[:space:]]DarkWake[[:space:]]+DarkWake[[:space:]]from ]]; then
+      dark_lines+=("$line")
+    elif [[ "$line" =~ [[:space:]]Wake[[:space:]]+(DarkWake[[:space:]]to[[:space:]]FullWake|Wake[[:space:]]from) ]]; then
+      # The first full wake after the start ends the trial window; later activity is the user's.
+      full_wake_epoch="$epoch"
+      break
+    fi
+  done < <(pmset -g log | awk -v day="$start_day" 'substr($0,1,10) >= day && ($0 ~ / DarkWake[ \t]+DarkWake from / || $0 ~ / Wake[ \t]+(DarkWake to FullWake|Wake from)/)')
 
-  local count=0
-  if [[ -n "$lines" ]]; then
-    count="$(printf '%s\n' "$lines" | wc -l | tr -d ' ')"
+  local count="${#dark_lines[@]}"
+  if [[ -n "$full_wake_epoch" ]]; then
+    echo "Window:   start -> first full wake at $(date -r "$full_wake_epoch" '+%Y-%m-%d %H:%M:%S')"
+  else
+    echo "Window:   start -> now (no full wake logged yet)"
   fi
   echo "DarkWakes: $count"
 
   if (( count > 0 )); then
+    # A battery trial that logs AC events was plugged in at some point, which invalidates it.
+    local on_ac=0
+    for line in "${dark_lines[@]}"; do
+      [[ "$line" == *"Using AC"* ]] && on_ac=$((on_ac + 1))
+    done
+    if (( on_ac > 0 )); then
+      echo "WARNING:  $on_ac of $count DarkWakes happened on AC power; this is not a clean battery trial."
+    fi
+
     echo "Reasons (hex like 0x70070000 stripped):"
     # Keep the text after "due to", drop the "Using AC/Batt (Charge...)" tail, strip hex flags and the "()" they leave.
-    printf '%s\n' "$lines" \
+    printf '%s\n' "${dark_lines[@]}" \
       | sed -E 's/^.*due to[[:space:]]+//' \
       | sed -E 's/[[:space:]]+Using (AC|Batt|BATT).*$//' \
       | sed -E 's/0x[0-9a-fA-F]+//g; s/\(\)//g; s/\.[[:space:]]/ /g; s/[[:space:]]+/ /g; s/^ //; s/ $//' \

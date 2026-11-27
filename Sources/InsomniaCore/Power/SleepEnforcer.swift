@@ -25,19 +25,19 @@ import os
 
 /// Finds and ends the current user's `caffeinate` processes.
 public protocol ProcessControlling: Sendable {
-    /// Pids of processes named exactly `caffeinate`, owned by the current user, excluding ours.
-    func caffeinatePids() -> [Int32]
-    /// Sends SIGTERM to `pid`.
-    /// - Returns: `false` when the process was already gone (ESRCH).
+    /// The current user's `/usr/bin/caffeinate` processes (excluding ours), with their start times.
+    func caffeinateProcesses() -> [ProcessIdentity]
+    /// Sends SIGTERM to the process if it is still the same caffeinate that was discovered.
+    /// - Returns: `false` when the process was already gone, replaced by another process, or no longer ours to signal.
     /// - Throws: For any failure other than ESRCH.
-    func terminate(pid: Int32) throws -> Bool
+    func terminate(_ process: ProcessIdentity) throws -> Bool
 }
 
 /// Reports how idle the user and display are.
 public protocol IdleStateProviding: Sendable {
     /// Seconds since the last keyboard/mouse/trackpad input, or nil if unknown.
     func idleSeconds() -> TimeInterval?
-    /// Whether the main display is asleep.
+    /// Whether every active display is asleep (false when that can't be determined).
     func isDisplayAsleep() -> Bool
     /// Seconds of idle after which macOS would sleep on its own for the current power
     /// source, or nil for "never" / unknown (no forced sleep then).
@@ -52,22 +52,32 @@ public protocol SystemSleeping: Sendable {
 
 /// Detects a remote session that would be cut off by a forced sleep.
 public protocol RemoteSessionDetecting: Sendable {
-    /// True when an SSH login or Screen Sharing session is active.
+    /// True when an SSH login, SSH connection without a terminal, or Screen Sharing session is active.
     func isRemoteSessionActive() -> Bool
 }
 
 /// Tells how long ago the Mac last woke.
 public protocol WakeTimeProviding: Sendable {
-    /// Seconds since the last wake (or since launch if it hasn't slept), never nil.
+    /// Seconds since the last wake (or since launch if it hasn't slept), on a clock that keeps counting through sleep.
     func secondsSinceWake() -> TimeInterval
 }
 
 // MARK: - Decision Logic
 
+// MARK: - Monotonic Clock
+
+/// A clock that is immune to wall-clock changes and keeps counting while the Mac sleeps.
+public enum MonotonicClock {
+    /// Seconds on `CLOCK_MONOTONIC`, which (unlike `CLOCK_UPTIME_RAW`) includes time asleep.
+    public static func seconds() -> TimeInterval {
+        TimeInterval(clock_gettime_nsec_np(CLOCK_MONOTONIC)) / 1_000_000_000
+    }
+}
+
 /// One thing the enforcer should do in a pass.
 public enum EnforcerAction: Equatable, Sendable {
-    /// SIGTERM these caffeinate pids.
-    case terminate([Int32])
+    /// SIGTERM these caffeinate processes.
+    case terminate([ProcessIdentity])
     /// Put the Mac to sleep.
     case sleepNow
 }
@@ -86,10 +96,10 @@ public struct EnforcerInput: Sendable {
     public var thresholdSeconds: TimeInterval?
     /// Whether the display is asleep.
     public var displayAsleep: Bool
-    /// Other processes' assertions.
+    /// Other processes' assertions, of every type.
     public var holders: [ForeignAssertion]
-    /// The current user's `caffeinate` pids.
-    public var caffeinatePids: [Int32]
+    /// The current user's `caffeinate` processes (terminated by the sweep, so never counted as blockers).
+    public var caffeinatePids: [ProcessIdentity]
     /// Whether an SSH or Screen Sharing session is active.
     public var remoteSessionActive: Bool
     /// Seconds since the last forced sleep, nil if none this run.
@@ -99,7 +109,7 @@ public struct EnforcerInput: Sendable {
     public init(
         isCaffeinated: Bool, settingEnabled: Bool, idleSeconds: TimeInterval?, secondsSinceWake: TimeInterval,
         thresholdSeconds: TimeInterval?, displayAsleep: Bool, holders: [ForeignAssertion],
-        caffeinatePids: [Int32], remoteSessionActive: Bool = false, secondsSinceForcedSleep: TimeInterval? = nil
+        caffeinatePids: [ProcessIdentity], remoteSessionActive: Bool = false, secondsSinceForcedSleep: TimeInterval? = nil
     ) {
         self.isCaffeinated = isCaffeinated
         self.settingEnabled = settingEnabled
@@ -115,50 +125,62 @@ public struct EnforcerInput: Sendable {
 }
 
 /// Enforces "only Insomnia keeps the Mac awake" while decaffeinated.
-public final class SleepEnforcer: @unchecked Sendable {
+///
+/// Main-actor isolated: the timer, the menu and the decaffeinate hook all run on the main thread,
+/// so the mutable state needs no lock.
+@MainActor
+public final class SleepEnforcer {
     // MARK: - Tunables
 
     /// Seconds between enforcement passes.
-    public static let passInterval: TimeInterval = 30
+    public nonisolated static let passInterval: TimeInterval = 30
     /// Minimum seconds between forced sleeps, so a sleep-wake-sleep loop can't form.
-    public static let sleepCooldown: TimeInterval = 300
-    /// Processes whose assertions mean real work is happening; forced sleep waits for them.
+    public nonisolated static let sleepCooldown: TimeInterval = 300
+    /// Processes whose assertions (of any type) mean real work is happening; forced sleep waits for them.
     /// `coreaudiod` holds an assertion while audio plays with the display off, so forcing sleep would cut music or podcasts off.
-    static let exemptHolderNames: Set<String> = ["backupd", "softwareupdated", "coreaudiod"]
+    nonisolated static let exemptHolderNames: Set<String> = ["backupd", "softwareupdated", "coreaudiod"]
 
     // MARK: - Decision
 
-    /// Decides what to do for one pass. Pure: no I/O, no clock.
-    ///
-    /// - Parameter input: A snapshot of the system.
-    /// - Returns: Actions in the order they should run.
-    public static func decide(_ input: EnforcerInput) -> [EnforcerAction] {
+    /// Phase 1 decision: which caffeinate processes to end. Pure: no I/O, no clock.
+    public nonisolated static func decideSweep(
+        isCaffeinated: Bool, settingEnabled: Bool, caffeinate: [ProcessIdentity]
+    ) -> [EnforcerAction] {
         // Insomnia caffeinated or the setting off means the user wants nothing enforced.
-        guard !input.isCaffeinated, input.settingEnabled else { return [] }
+        guard !isCaffeinated, settingEnabled, !caffeinate.isEmpty else { return [] }
+        return [.terminate(caffeinate)]
+    }
 
-        var actions: [EnforcerAction] = []
-        if !input.caffeinatePids.isEmpty {
-            actions.append(.terminate(input.caffeinatePids))
-        }
+    /// Phase 2 decision: whether to put the Mac to sleep. Pure: no I/O, no clock.
+    public nonisolated static func shouldSleep(_ input: EnforcerInput) -> Bool {
+        guard !input.isCaffeinated, input.settingEnabled else { return false }
 
-        // Holders that survive the terminate step are the ones that would still block idle sleep.
-        let terminating = Set(input.caffeinatePids)
-        let remaining = input.holders.filter { !terminating.contains($0.pid) }
-        guard !remaining.isEmpty else { return actions }
+        // Only idle-blocking types that survive the sweep would still keep the Mac awake.
+        let terminating = Set(input.caffeinatePids.map(\.pid))
+        let blockers = input.holders.filter { $0.blocksIdleSleep && !terminating.contains($0.pid) }
+        guard !blockers.isEmpty else { return false }
 
         // A display assertion (e.g. a video player) keeps the screen on; never interrupt it.
-        guard input.displayAsleep else { return actions }
-        guard !input.remoteSessionActive else { return actions }
-        guard !input.holders.contains(where: { exemptHolderNames.contains($0.processName) }) else { return actions }
-        guard let threshold = input.thresholdSeconds, let idle = input.idleSeconds else { return actions }
+        guard input.displayAsleep else { return false }
+        guard !input.remoteSessionActive else { return false }
+        // The exemption looks at assertions of any type: backupd's BackgroundTask doesn't block sleep but is real work.
+        guard !input.holders.contains(where: { exemptHolderNames.contains($0.processName) }) else { return false }
+        guard let threshold = input.thresholdSeconds, let idle = input.idleSeconds else { return false }
 
         // Idle counts from the last wake so every wake gets a full threshold before we act.
         let effectiveIdle = min(idle, input.secondsSinceWake)
-        guard effectiveIdle >= threshold else { return actions }
+        guard effectiveIdle >= threshold else { return false }
 
-        if let since = input.secondsSinceForcedSleep, since < sleepCooldown { return actions }
+        if let since = input.secondsSinceForcedSleep, since < sleepCooldown { return false }
+        return true
+    }
 
-        actions.append(.sleepNow)
+    /// Full decision for a snapshot: sweep first, then sleep if still warranted.
+    public nonisolated static func decide(_ input: EnforcerInput) -> [EnforcerAction] {
+        var actions = decideSweep(
+            isCaffeinated: input.isCaffeinated, settingEnabled: input.settingEnabled, caffeinate: input.caffeinatePids
+        )
+        if shouldSleep(input) { actions.append(.sleepNow) }
         return actions
     }
 
@@ -172,17 +194,15 @@ public final class SleepEnforcer: @unchecked Sendable {
     private let reader: ForeignAssertionReading
     private let remote: RemoteSessionDetecting
     private let wake: WakeTimeProviding
-    private let now: @Sendable () -> Date
+    private let monotonicNow: @Sendable () -> TimeInterval
     private let logger = Logger(subsystem: BuildEnvironment.bundleIdentifier, category: "SleepEnforcer")
 
     // MARK: - State
 
-    /// Repeating pass timer; main run loop only.
+    /// Repeating pass timer.
     private var timer: Timer?
-    /// When we last forced a sleep, for the cooldown.
-    private var lastForcedSleep: Date?
-    /// Guards `lastForcedSleep` and `timer` against off-main callers (IPC thread).
-    private let lock = NSLock()
+    /// Monotonic time of the last forced sleep, for the cooldown.
+    private var lastForcedSleep: TimeInterval?
 
     // MARK: - Initialization
 
@@ -196,7 +216,7 @@ public final class SleepEnforcer: @unchecked Sendable {
         reader: ForeignAssertionReading = IOKitForeignAssertionReader(),
         remote: RemoteSessionDetecting = SystemRemoteSessionDetector(),
         wake: WakeTimeProviding = WorkspaceWakeTracker.shared,
-        now: @escaping @Sendable () -> Date = { Date() }
+        monotonicNow: @escaping @Sendable () -> TimeInterval = { MonotonicClock.seconds() }
     ) {
         self.powerManager = powerManager
         self.configuration = configuration
@@ -206,7 +226,7 @@ public final class SleepEnforcer: @unchecked Sendable {
         self.reader = reader
         self.remote = remote
         self.wake = wake
-        self.now = now
+        self.monotonicNow = monotonicNow
     }
 
     // MARK: - Lifecycle
@@ -219,59 +239,68 @@ public final class SleepEnforcer: @unchecked Sendable {
 
     /// Stops the timer. Safe to call repeatedly.
     public func stop() {
-        lock.lock()
         timer?.invalidate()
         timer = nil
-        lock.unlock()
     }
 
     /// Ensures the repeating timer exists (same pattern as the schedule timer).
     private func ensureTimerRunning() {
-        lock.lock()
-        defer { lock.unlock() }
         guard timer == nil else { return }
         timer = Timer.scheduledTimer(withTimeInterval: Self.passInterval, repeats: true) { [weak self] _ in
-            self?.enforceNow()
+            // Timer's block is nonisolated; hop to the main actor where the enforcer lives.
+            Task { @MainActor in self?.enforceNow() }
         }
     }
 
     // MARK: - Enforcement
 
     /// Runs one enforcement pass now.
+    ///
+    /// Two phases: the sweep first, then a fresh read of every safety input right before any sleep
+    /// decision, so a snapshot taken before the sweep can't drive a stale forced sleep.
     public func enforceNow() {
-        // Cheap early exit so a caffeinated Mac or a disabled setting costs nothing per tick.
         guard !powerManager.state.isActive, configuration.onlyInsomniaKeepsAwake else { return }
 
-        let holders = currentForeignHolders()
-        let caffeinatePids = processes.caffeinatePids()
-        lock.lock()
-        let lastSleep = lastForcedSleep
-        lock.unlock()
+        // Phase 1: end other apps' caffeinate.
+        let discovered = processes.caffeinateProcesses()
+        for action in Self.decideSweep(isCaffeinated: false, settingEnabled: true, caffeinate: discovered) {
+            if case .terminate(let targets) = action { terminate(targets) }
+        }
 
+        // Phase 2: re-read everything, and defer on any read that fails.
+        guard !powerManager.state.isActive, configuration.onlyInsomniaKeepsAwake else { return }
+        let holders: [ForeignAssertion]
+        do {
+            holders = try reader.readAssertions()
+        } catch {
+            logger.error("Skipping sleep check, could not read assertions: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        guard let idleSeconds = idle.idleSeconds() else {
+            logger.debug("Skipping sleep check: idle time unavailable")
+            return
+        }
+        guard let threshold = idle.sleepThresholdSeconds() else {
+            logger.debug("Skipping sleep check: sleep threshold unavailable or never")
+            return
+        }
+        let now = monotonicNow()
         let input = EnforcerInput(
             isCaffeinated: powerManager.state.isActive,
             settingEnabled: configuration.onlyInsomniaKeepsAwake,
-            idleSeconds: idle.idleSeconds(),
+            idleSeconds: idleSeconds,
             secondsSinceWake: wake.secondsSinceWake(),
-            thresholdSeconds: idle.sleepThresholdSeconds(),
+            thresholdSeconds: threshold,
             displayAsleep: idle.isDisplayAsleep(),
             holders: holders,
-            caffeinatePids: caffeinatePids,
+            caffeinatePids: discovered,
             remoteSessionActive: remote.isRemoteSessionActive(),
-            secondsSinceForcedSleep: lastSleep.map { now().timeIntervalSince($0) }
+            secondsSinceForcedSleep: lastForcedSleep.map { now - $0 }
         )
-
-        for action in Self.decide(input) {
-            switch action {
-            case .terminate(let pids):
-                terminate(pids, holders: holders)
-            case .sleepNow:
-                forceSleep(input: input)
-            }
-        }
+        if Self.shouldSleep(input) { forceSleep(input: input) }
     }
 
-    /// Reads other processes' assertions; failures are logged and yield an empty list.
+    /// Reads other processes' assertions for the menu; failures are logged and yield an empty list.
     public func currentForeignHolders() -> [ForeignAssertion] {
         do {
             return try reader.readAssertions()
@@ -281,33 +310,33 @@ public final class SleepEnforcer: @unchecked Sendable {
         }
     }
 
-    /// Sends SIGTERM to each pid, logging the owning app for the record.
-    private func terminate(_ pids: [Int32], holders: [ForeignAssertion]) {
-        for pid in pids {
-            let owner = holders.first { $0.pid == pid }?.owningAppName
-                ?? OwningAppResolver.resolve(pid: pid, parentOf: ProcessTable.parentPid(of:), nameOf: ProcessTable.displayName(of:))
+    /// Sends SIGTERM to each process, logging the owning app for the record.
+    private func terminate(_ targets: [ProcessIdentity]) {
+        for target in targets {
+            let owner = OwningAppResolver.resolve(
+                pid: target.pid, parentOf: ProcessTable.parentPid(of:), nameOf: ProcessTable.displayName(of:)
+            )
             do {
-                if try processes.terminate(pid: pid) {
-                    logger.notice("Terminated caffeinate pid \(pid) (owner: \(owner, privacy: .public))")
+                if try processes.terminate(target) {
+                    logger.notice("Terminated caffeinate pid \(target.pid) (owner: \(owner, privacy: .public))")
                 } else {
-                    // Already gone: another pass or the owner got there first.
-                    logger.debug("caffeinate pid \(pid) already exited (ESRCH)")
+                    // Gone, replaced, or no longer ours: nothing was signalled.
+                    logger.debug("caffeinate pid \(target.pid) not signalled (already exited or changed)")
                 }
             } catch {
-                logger.error("Failed to terminate pid \(pid): \(error.localizedDescription, privacy: .public)")
+                logger.error("Failed to terminate pid \(target.pid): \(error.localizedDescription, privacy: .public)")
             }
         }
     }
 
     /// Puts the Mac to sleep and starts the cooldown.
     private func forceSleep(input: EnforcerInput) {
-        let holderSummary = input.holders.map { "\($0.owningAppName):\($0.processName)" }.joined(separator: ", ")
+        let holderSummary = input.holders.filter(\.blocksIdleSleep)
+            .map { "\($0.owningAppName):\($0.processName)" }.joined(separator: ", ")
         let idleText = input.idleSeconds.map { String(Int($0)) } ?? "unknown"
         do {
             try sleeper.sleepNow()
-            lock.lock()
-            lastForcedSleep = now()
-            lock.unlock()
+            lastForcedSleep = monotonicNow()
             logger.notice("Forced sleep after \(idleText)s idle; holders: \(holderSummary, privacy: .public)")
         } catch {
             logger.error("Forced sleep failed: \(error.localizedDescription, privacy: .public)")
@@ -317,34 +346,32 @@ public final class SleepEnforcer: @unchecked Sendable {
 
 // MARK: - Real Implementations
 
-/// Real process control: lists and SIGTERMs the user's own `caffeinate` processes.
+/// Real process control: lists and SIGTERMs the user's own `/usr/bin/caffeinate` processes.
 public final class SystemProcessController: ProcessControlling, @unchecked Sendable {
     /// Creates the controller.
     public init() {}
 
-    /// The only executable name we will ever signal.
-    private static let targetName = "caffeinate"
+    /// The only executable we will ever signal. Matching the path (not just the name) stops a
+    /// user-owned binary that happens to be called `caffeinate` from being a kill target.
+    static let targetPath = "/usr/bin/caffeinate"
 
-    /// Pids named exactly `caffeinate`, owned by this user, excluding our own pid.
-    public func caffeinatePids() -> [Int32] {
-        let me = getuid()
-        let ownPid = getpid()
-        return ProcessTable.allPids().filter { pid in
-            pid != ownPid
-                && ProcessTable.name(of: pid) == Self.targetName
-                && ProcessTable.ownerUid(of: pid) == me
-        }
+    /// Whether a pid is currently an `/usr/bin/caffeinate` owned (real uid) by this user, and not us.
+    private func identityIfTarget(_ pid: Int32) -> ProcessIdentity? {
+        guard pid != getpid(),
+              ProcessTable.path(of: pid) == Self.targetPath,
+              ProcessTable.realUid(of: pid) == getuid() else { return nil }
+        return ProcessTable.identity(of: pid)
     }
 
-    /// SIGTERM only; re-checks name and owner right before signalling to narrow the pid-reuse window.
-    public func terminate(pid: Int32) throws -> Bool {
-        guard pid != getpid(),
-              ProcessTable.name(of: pid) == Self.targetName,
-              ProcessTable.ownerUid(of: pid) == getuid() else {
-            // Not (or no longer) a caffeinate of ours: treat as gone rather than risk another process.
-            return false
-        }
-        if kill(pid, SIGTERM) == 0 { return true }
+    /// Our caffeinate processes with their start times.
+    public func caffeinateProcesses() -> [ProcessIdentity] {
+        ProcessTable.allPids().compactMap(identityIfTarget(_:))
+    }
+
+    /// SIGTERM only; revalidates path, owner and start time right before signalling to close the pid-reuse window.
+    public func terminate(_ process: ProcessIdentity) throws -> Bool {
+        guard let current = identityIfTarget(process.pid), current == process else { return false }
+        if kill(process.pid, SIGTERM) == 0 { return true }
         if errno == ESRCH { return false }
         throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EPERM)
     }
@@ -362,9 +389,13 @@ public final class SystemIdleState: IdleStateProviding, @unchecked Sendable {
         return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
     }
 
-    /// Whether the main display is asleep.
+    /// Whether every active display is asleep; false when the list can't be read (the safe answer).
     public func isDisplayAsleep() -> Bool {
-        CGDisplayIsAsleep(CGMainDisplayID()) != 0
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return false }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetOnlineDisplayList(count, &ids, &count) == .success, count > 0 else { return false }
+        return ids.prefix(Int(count)).allSatisfy { CGDisplayIsAsleep($0) != 0 }
     }
 
     /// max(system sleep, display sleep) for the active power source, in seconds.
@@ -386,11 +417,22 @@ public final class SystemIdleState: IdleStateProviding, @unchecked Sendable {
             logger.error("Could not read power preferences: \(error.localizedDescription, privacy: .public)")
             return nil
         }
-        guard let settings = prefs[Self.currentPowerSourceKey()] as? [String: Any] else { return nil }
-        let systemMinutes = (settings["System Sleep Timer"] as? NSNumber)?.doubleValue ?? 0
-        let displayMinutes = (settings["Display Sleep Timer"] as? NSNumber)?.doubleValue ?? 0
+        return Self.threshold(from: prefs, sourceKey: Self.currentPowerSourceKey())
+    }
+
+    /// Pure threshold calculation from the preferences plist contents.
+    ///
+    /// - Parameters:
+    ///   - prefs: Parsed `com.apple.PowerManagement.plist`.
+    ///   - sourceKey: `AC Power` or `Battery Power`; nil (UPS / unknown source) yields nil.
+    /// - Returns: max(system, display) sleep timer in seconds, or nil when either timer is missing
+    ///   or both are zero ("never"), meaning no forced sleep.
+    public nonisolated static func threshold(from prefs: [String: Any], sourceKey: String?) -> TimeInterval? {
+        guard let sourceKey, let settings = prefs[sourceKey] as? [String: Any],
+              let system = (settings["System Sleep Timer"] as? NSNumber)?.doubleValue,
+              let display = (settings["Display Sleep Timer"] as? NSNumber)?.doubleValue else { return nil }
         // Whichever timer is set decides when macOS would sleep; both zero means it never will.
-        let minutes = max(systemMinutes, displayMinutes)
+        let minutes = max(system, display)
         return minutes > 0 ? minutes * 60 : nil
     }
 
@@ -400,10 +442,15 @@ public final class SystemIdleState: IdleStateProviding, @unchecked Sendable {
     /// Logger for threshold read failures.
     private let logger = Logger(subsystem: BuildEnvironment.bundleIdentifier, category: "SystemIdleState")
 
-    /// The preferences key for the power source currently supplying power.
-    static func currentPowerSourceKey() -> String {
-        let providing = IOPSGetProvidingPowerSourceType(nil)?.takeRetainedValue() as String?
-        return providing == kIOPSBatteryPowerValue ? "Battery Power" : "AC Power"
+    /// The preferences key for the power source currently supplying power; nil for UPS or unknown.
+    static func currentPowerSourceKey() -> String? {
+        // Copy-rule snapshot is retained here and released when it goes out of scope.
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              // The Get-rule string is owned by the snapshot, so it is unretained.
+              let providing = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String? else { return nil }
+        if providing == kIOPSACPowerValue { return "AC Power" }
+        if providing == kIOPSBatteryPowerValue { return "Battery Power" }
+        return nil
     }
 }
 
@@ -422,14 +469,37 @@ public final class IOKitSystemSleeper: SystemSleeping, @unchecked Sendable {
     }
 }
 
-/// Real remote-session detection: SSH logins via utmpx, Screen Sharing via its daemon.
+/// Real remote-session detection: SSH logins via utmpx, SSH without a terminal, Screen Sharing.
 public final class SystemRemoteSessionDetector: RemoteSessionDetecting, @unchecked Sendable {
     /// Creates the detector.
     public init() {}
 
-    /// True for an SSH login (utmpx user process with a host) or a running `screensharingd`.
+    /// True for an SSH login, an SSH connection without a PTY, or a running `screensharingd`.
     public func isRemoteSessionActive() -> Bool {
-        hasRemoteLogin() || ProcessTable.allPids().contains { ProcessTable.name(of: $0) == "screensharingd" }
+        if hasRemoteLogin() { return true }
+        let pids = ProcessTable.allPids()
+        return Self.hasRemoteProcess(pids: pids, nameOf: ProcessTable.name(of:), parentOf: ProcessTable.parentPid(of:))
+    }
+
+    /// Pure process-table check for remote sessions that utmpx can't see.
+    ///
+    /// - `sshd-session` runs once per SSH connection, with or without a PTY.
+    /// - An `sshd` whose parent isn't launchd is a per-connection child (the launchd-owned one is the idle listener).
+    /// - `screensharingd` is started on demand by launchd for each connection, so its presence means a live session.
+    static func hasRemoteProcess(
+        pids: [Int32], nameOf: (Int32) -> String?, parentOf: (Int32) -> Int32?
+    ) -> Bool {
+        for pid in pids {
+            switch nameOf(pid) {
+            case "sshd-session", "screensharingd":
+                return true
+            case "sshd":
+                if let parent = parentOf(pid), parent != 1 { return true }
+            default:
+                continue
+            }
+        }
+        return false
     }
 
     /// Scans utmpx for a USER_PROCESS entry whose `ut_host` is non-empty.
@@ -453,10 +523,10 @@ public final class WorkspaceWakeTracker: WakeTimeProviding, @unchecked Sendable 
     /// Shared tracker; observing once is enough.
     public static let shared = WorkspaceWakeTracker()
 
-    /// Guards `lastWake`, which the notification (main) and enforcer passes may touch.
+    /// Guards `lastWake`, which the notification and enforcer passes may touch from different threads.
     private let lock = NSLock()
-    /// Launch counts as a wake so a fresh start also gets a full threshold.
-    private var lastWake = Date()
+    /// Monotonic time of the last wake. Launch counts as a wake so a fresh start also gets a full threshold.
+    private var lastWake = MonotonicClock.seconds()
     /// Held so the observer can be removed.
     private var observer: NSObjectProtocol?
 
@@ -477,10 +547,10 @@ public final class WorkspaceWakeTracker: WakeTimeProviding, @unchecked Sendable 
         #endif
     }
 
-    /// Records a wake at the current time.
+    /// Records a wake at the current monotonic time.
     func recordWake() {
         lock.lock()
-        lastWake = Date()
+        lastWake = MonotonicClock.seconds()
         lock.unlock()
     }
 
@@ -488,6 +558,6 @@ public final class WorkspaceWakeTracker: WakeTimeProviding, @unchecked Sendable 
     public func secondsSinceWake() -> TimeInterval {
         lock.lock()
         defer { lock.unlock() }
-        return Date().timeIntervalSince(lastWake)
+        return MonotonicClock.seconds() - lastWake
     }
 }

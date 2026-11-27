@@ -34,6 +34,20 @@ public struct ForeignAssertion: Equatable, Sendable {
         self.name = name
     }
 
+    /// Assertion types that can keep the Mac from idle-sleeping.
+    static let idleBlockingTypes: Set<String> = [
+        "PreventUserIdleSystemSleep",
+        "PreventUserIdleDisplaySleep",
+        "NoIdleSleepAssertion",
+        "PreventSystemSleep",
+    ]
+
+    /// Whether this assertion's type can keep the Mac from idle-sleeping.
+    /// Other types (e.g. backupd's BackgroundTask) don't block sleep but still signal real work.
+    public var blocksIdleSleep: Bool {
+        Self.idleBlockingTypes.contains(type)
+    }
+
     /// Process names whose assertions are macOS's own sleep policy, not an app choosing to stay awake.
     /// `powerd` always holds "Prevent sleep while display is on", so listing it would be permanent noise.
     static let systemPolicyProcessNames: Set<String> = ["powerd"]
@@ -58,7 +72,8 @@ public struct ForeignAssertion: Equatable, Sendable {
 
 /// Abstracts reading other processes' assertions so tests never touch IOKit.
 public protocol ForeignAssertionReading: Sendable {
-    /// Returns every idle-sleep-relevant assertion held by processes other than ours.
+    /// Returns every assertion (any type) held by processes other than ours, minus macOS's own policy holders.
+    /// Callers filter on `blocksIdleSleep`; the unfiltered list lets the enforcer see work like backups.
     func readAssertions() throws -> [ForeignAssertion]
 }
 
@@ -66,11 +81,14 @@ public protocol ForeignAssertionReading: Sendable {
 public enum ForeignAssertionError: Error, LocalizedError {
     /// `IOPMCopyAssertionsByProcess` returned a failure code.
     case copyFailed(ioReturn: Int32)
+    /// The returned dictionary didn't have the documented pid -> assertions shape.
+    case unexpectedShape
 
     /// Description including the IOReturn for logs.
     public var errorDescription: String? {
         switch self {
         case .copyFailed(let code): return "IOPMCopyAssertionsByProcess failed (IOReturn: \(code))"
+        case .unexpectedShape: return "IOPMCopyAssertionsByProcess returned an unexpected structure"
         }
     }
 }
@@ -106,6 +124,25 @@ public enum OwningAppResolver {
             current = parent
         }
         return ownName
+    }
+}
+
+// MARK: - Process Identity
+
+/// A process identified by pid and start time, so a recycled pid is never mistaken for the original.
+public struct ProcessIdentity: Equatable, Hashable, Sendable {
+    /// The process id.
+    public let pid: Int32
+    /// Start time, seconds part.
+    public let startSeconds: UInt64
+    /// Start time, microseconds part.
+    public let startMicroseconds: UInt64
+
+    /// Creates an identity.
+    public init(pid: Int32, startSeconds: UInt64, startMicroseconds: UInt64) {
+        self.pid = pid
+        self.startSeconds = startSeconds
+        self.startMicroseconds = startMicroseconds
     }
 }
 
@@ -157,13 +194,32 @@ public enum ProcessTable {
         return info.kp_eproc.e_ppid
     }
 
-    /// The real user id that owns a pid, or nil when unreadable.
-    public static func ownerUid(of pid: Int32) -> uid_t? {
+    /// The BSD info (real uid, start time) for a pid, or nil when unreadable.
+    static func bsdInfo(of pid: Int32) -> proc_bsdinfo? {
         var info = proc_bsdinfo()
         let size = Int32(MemoryLayout<proc_bsdinfo>.size)
         let written = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size)
-        guard written == size else { return nil }
-        return info.pbi_uid
+        return written == size ? info : nil
+    }
+
+    /// The real user id that owns a pid, or nil when unreadable.
+    public static func realUid(of pid: Int32) -> uid_t? {
+        bsdInfo(of: pid)?.pbi_ruid
+    }
+
+    /// Full executable path via `proc_pidpath`, or nil when unreadable.
+    public static func path(of pid: Int32) -> String? {
+        // PROC_PIDPATHINFO_MAXSIZE is 4 * MAXPATHLEN; spelled out because the macro isn't imported.
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        let length = proc_pidpath(pid, &buffer, UInt32(buffer.count))
+        guard length > 0 else { return nil }
+        return String(cString: buffer)
+    }
+
+    /// The pid plus its start time, which together identify one process even if the pid is reused.
+    public static func identity(of pid: Int32) -> ProcessIdentity? {
+        guard let info = bsdInfo(of: pid) else { return nil }
+        return ProcessIdentity(pid: pid, startSeconds: info.pbi_start_tvsec, startMicroseconds: info.pbi_start_tvusec)
     }
 
     /// Every pid visible to the current user.
@@ -184,14 +240,6 @@ public enum ProcessTable {
 
 /// Reads assertions from `IOPMCopyAssertionsByProcess`.
 public final class IOKitForeignAssertionReader: ForeignAssertionReading, @unchecked Sendable {
-    /// Assertion types that can keep the Mac from idle-sleeping.
-    static let relevantTypes: Set<String> = [
-        "PreventUserIdleSystemSleep",
-        "PreventUserIdleDisplaySleep",
-        "NoIdleSleepAssertion",
-        "PreventSystemSleep",
-    ]
-
     /// Pid excluded from results (ours, so we never list our own assertion).
     private let ownPid: Int32
 
@@ -200,7 +248,7 @@ public final class IOKitForeignAssertionReader: ForeignAssertionReading, @unchec
         self.ownPid = ownPid
     }
 
-    /// Returns the relevant assertions held by every other process.
+    /// Returns the assertions held by every other process, minus macOS policy holders.
     public func readAssertions() throws -> [ForeignAssertion] {
         var unmanaged: Unmanaged<CFDictionary>?
         let result = IOPMCopyAssertionsByProcess(&unmanaged)
@@ -208,28 +256,40 @@ public final class IOKitForeignAssertionReader: ForeignAssertionReading, @unchec
             throw ForeignAssertionError.copyFailed(ioReturn: result)
         }
         // The dictionary maps NSNumber pid -> array of assertion dictionaries.
-        guard let table = byProcess as? [NSNumber: [[String: Any]]] else { return [] }
+        guard let table = byProcess as? [NSNumber: [[String: Any]]] else {
+            throw ForeignAssertionError.unexpectedShape
+        }
+        return Self.parse(
+            table, ownPid: ownPid, nameOf: ProcessTable.name(of:),
+            parentOf: ProcessTable.parentPid(of:), displayNameOf: ProcessTable.displayName(of:)
+        )
+    }
 
+    /// Pure parse of the IOKit table; process lookups are injected so tests can feed fixtures.
+    static func parse(
+        _ table: [NSNumber: [[String: Any]]],
+        ownPid: Int32,
+        nameOf: (Int32) -> String?,
+        parentOf: (Int32) -> Int32?,
+        displayNameOf: (Int32) -> String?
+    ) -> [ForeignAssertion] {
         var found: [ForeignAssertion] = []
         for (pidNumber, assertions) in table {
             let pid = pidNumber.int32Value
             if pid == ownPid { continue }
-            let processName = ProcessTable.name(of: pid) ?? "pid \(pid)"
-            // System policy holders never reach the menu or the enforcer.
+            let processName = nameOf(pid) ?? "pid \(pid)"
+            // System policy holders (powerd) never reach the menu or the enforcer.
             if ForeignAssertion.systemPolicyProcessNames.contains(processName) { continue }
-            let owner = OwningAppResolver.resolve(
-                pid: pid, parentOf: ProcessTable.parentPid(of:), nameOf: ProcessTable.displayName(of:)
-            )
+            let owner = OwningAppResolver.resolve(pid: pid, parentOf: parentOf, nameOf: displayNameOf)
             for assertion in assertions {
-                guard let type = assertion[kIOPMAssertionTypeKey as String] as? String,
-                      Self.relevantTypes.contains(type) else { continue }
+                guard let type = assertion[kIOPMAssertionTypeKey as String] as? String else { continue }
                 let name = assertion[kIOPMAssertionNameKey as String] as? String ?? ""
                 found.append(ForeignAssertion(
                     pid: pid, processName: processName, owningAppName: owner, type: type, name: name
                 ))
             }
         }
-        return found.sorted { ($0.owningAppName, $0.pid) < ($1.owningAppName, $1.pid) }
+        return found.sorted { ($0.owningAppName, $0.pid, $0.type) < ($1.owningAppName, $1.pid, $1.type) }
     }
 }
 
@@ -246,7 +306,8 @@ public enum ForeignHolderSummary {
     public static func rows(for holders: [ForeignAssertion], limit: Int = 5) -> [String] {
         var order: [String] = []
         var grouped: [String: [ForeignAssertion]] = [:]
-        for holder in holders {
+        // The menu lists only what can block idle sleep; other types (backup tasks etc.) are not "keeping it awake".
+        for holder in holders where holder.blocksIdleSleep {
             if grouped[holder.owningAppName] == nil { order.append(holder.owningAppName) }
             grouped[holder.owningAppName, default: []].append(holder)
         }

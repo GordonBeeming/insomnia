@@ -16,6 +16,7 @@ import InsomniaCore
 /// - Runs the ``SleepEnforcer`` that ends other apps' caffeinate while decaffeinated
 /// - Starts the ``UpdateChecker`` for periodic GitHub release checks
 /// - Releases all power assertions and stops the IPC server on termination
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Shared State
 
@@ -64,7 +65,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Sweep right after every way of decaffeinating, then every 30 s
         scheduler.powerManager.onDecaffeinated = { [weak self] in
-            self?.sleepEnforcer.enforceNow()
+            // decaffeinate() can come from the IPC thread; the enforcer lives on the main actor
+            Task { @MainActor in self?.sleepEnforcer.enforceNow() }
+        }
+        configuration.onEnforcementEnabled = { [weak self] in
+            Task { @MainActor in self?.sleepEnforcer.enforceNow() }
         }
         sleepEnforcer.start()
 
@@ -79,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Stop enforcing first so quitting doesn't kill other apps' caffeinate
         scheduler.powerManager.onDecaffeinated = nil
+        configuration.onEnforcementEnabled = nil
         sleepEnforcer.stop()
 
         // Release all power assertions and stop watches

@@ -56,7 +56,7 @@ jobs:
       # Compiles every target defined in Package.swift (CLI, GUI, Core, Tests)
       # This catches compilation errors before running tests
       - name: Build all targets
-        run: swift build --build-tests
+        run: swift build --build-tests -Xswiftc -strict-concurrency=complete
 
       # --- Run tests ----------------------------------------------------------
       # Executes all test targets (unit + integration tests)

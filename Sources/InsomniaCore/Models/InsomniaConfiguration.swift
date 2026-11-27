@@ -103,8 +103,13 @@ public final class InsomniaConfiguration {
         didSet {
             // Persist the updated value to UserDefaults
             defaults.set(onlyInsomniaKeepsAwake, forKey: ConfigKeys.onlyInsomniaKeepsAwake)
+            // Turning enforcement on should act now, not at the next 30 s tick
+            if onlyInsomniaKeepsAwake && !oldValue { onEnforcementEnabled?() }
         }
     }
+
+    /// Called when `onlyInsomniaKeepsAwake` flips from off to on; the app wires it to an immediate enforcement pass.
+    @ObservationIgnored public var onEnforcementEnabled: (() -> Void)?
 
     /// The configured schedule rules for automatic caffeination.
     public var scheduleRules: [ScheduleRule] {

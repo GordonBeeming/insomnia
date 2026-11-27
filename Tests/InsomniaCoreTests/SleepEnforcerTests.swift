@@ -11,20 +11,23 @@ import XCTest
 
 /// Records terminations instead of signalling anything.
 final class MockProcessController: ProcessControlling, @unchecked Sendable {
-    var pids: [Int32] = []
+    var pids: [ProcessIdentity] = []
     var terminated: [Int32] = []
     /// Pids that report as already gone (ESRCH).
     var gone: Set<Int32> = []
-    func caffeinatePids() -> [Int32] { pids }
-    func terminate(pid: Int32) throws -> Bool {
-        terminated.append(pid)
-        return !gone.contains(pid)
+    /// Runs during the sweep, to simulate the world changing while processes are being ended.
+    var onTerminate: (() -> Void)?
+    func caffeinateProcesses() -> [ProcessIdentity] { pids }
+    func terminate(_ process: ProcessIdentity) throws -> Bool {
+        terminated.append(process.pid)
+        onTerminate?()
+        return !gone.contains(process.pid)
     }
 }
 
 /// Fixed idle readings.
 final class MockIdleState: IdleStateProviding, @unchecked Sendable {
-    var idle: TimeInterval? = 0
+        var idle: TimeInterval? = 0
     var displayAsleep = false
     var threshold: TimeInterval? = 600
     func idleSeconds() -> TimeInterval? { idle }
@@ -41,7 +44,12 @@ final class MockSleeper: SystemSleeping, @unchecked Sendable {
 /// Fixed assertion list.
 final class MockReader: ForeignAssertionReading, @unchecked Sendable {
     var assertions: [ForeignAssertion] = []
-    func readAssertions() throws -> [ForeignAssertion] { assertions }
+    /// When set, reads throw it (a failed safety read must defer sleep).
+    var error: Error?
+    func readAssertions() throws -> [ForeignAssertion] {
+        if let error { throw error }
+        return assertions
+    }
 }
 
 /// Fixed remote-session answer.
@@ -58,7 +66,7 @@ final class MockWake: WakeTimeProviding, @unchecked Sendable {
 
 /// Mutable clock for cooldown tests.
 final class MockClock: @unchecked Sendable {
-    var date = Date(timeIntervalSince1970: 1_000_000)
+    var seconds: TimeInterval = 1_000_000
 }
 
 // MARK: - Helpers
@@ -72,6 +80,11 @@ let settingSuiteName = "com.insomnia.tests.OnlyInsomniaSetting"
 func freshSuite(_ name: String) -> UserDefaults {
     UserDefaults.standard.removePersistentDomain(forName: name)
     return UserDefaults(suiteName: name) ?? .standard
+}
+
+/// Builds process identities with fixed start times for the given pids.
+private func ids(_ pids: Int32...) -> [ProcessIdentity] {
+    pids.map { ProcessIdentity(pid: $0, startSeconds: 1, startMicroseconds: 2) }
 }
 
 private func holder(_ pid: Int32 = 100, process: String = "claude", app: String = "claude") -> ForeignAssertion {
@@ -91,22 +104,22 @@ final class SleepEnforcerDecisionTests: XCTestCase {
     func testCaffeinatedIsNoOp() {
         var input = sleepyInput()
         input.isCaffeinated = true
-        input.caffeinatePids = [1]
+        input.caffeinatePids = ids(1)
         XCTAssertEqual(SleepEnforcer.decide(input), [])
     }
 
     func testSettingOffIsNoOp() {
         var input = sleepyInput()
         input.settingEnabled = false
-        input.caffeinatePids = [1]
+        input.caffeinatePids = ids(1)
         XCTAssertEqual(SleepEnforcer.decide(input), [])
     }
 
     func testDecaffeinatedTerminatesCaffeinatePids() {
         var input = sleepyInput()
         input.holders = []
-        input.caffeinatePids = [11, 12]
-        XCTAssertEqual(SleepEnforcer.decide(input), [.terminate([11, 12])])
+        input.caffeinatePids = ids(11, 12)
+        XCTAssertEqual(SleepEnforcer.decide(input), [.terminate(ids(11, 12))])
     }
 
     func testIdleBelowThresholdDoesNotSleep() {
@@ -134,8 +147,8 @@ final class SleepEnforcerDecisionTests: XCTestCase {
     func testOnlyTerminatedHoldersDoNotSleepThisPass() {
         var input = sleepyInput()
         input.holders = [holder(11, process: "caffeinate")]
-        input.caffeinatePids = [11]
-        XCTAssertEqual(SleepEnforcer.decide(input), [.terminate([11])])
+        input.caffeinatePids = ids(11)
+        XCTAssertEqual(SleepEnforcer.decide(input), [.terminate(ids(11))])
     }
 
     func testThresholdNeverDoesNotSleep() {
@@ -159,8 +172,8 @@ final class SleepEnforcerDecisionTests: XCTestCase {
     func testCoreaudiodHolderDefersSleepButTerminateStillRuns() {
         var input = sleepyInput()
         input.holders = [holder(), holder(9, process: "coreaudiod", app: "coreaudiod"), holder(11, process: "caffeinate")]
-        input.caffeinatePids = [11]
-        XCTAssertEqual(SleepEnforcer.decide(input), [.terminate([11])])
+        input.caffeinatePids = ids(11)
+        XCTAssertEqual(SleepEnforcer.decide(input), [.terminate(ids(11))])
     }
 
     func testCooldownBlocksSecondSleep() {
@@ -192,6 +205,7 @@ final class SleepEnforcerDecisionTests: XCTestCase {
 
 // MARK: - Orchestration
 
+@MainActor
 final class SleepEnforcerOrchestrationTests: XCTestCase {
     private var power: PowerAssertionManager!
     private var config: InsomniaConfiguration!
@@ -220,7 +234,7 @@ final class SleepEnforcerOrchestrationTests: XCTestCase {
         let clock = self.clock!
         enforcer = SleepEnforcer(
             powerManager: power, configuration: config, processes: processes, idle: idle, sleeper: sleeper,
-            reader: reader, remote: remote, wake: wake, now: { clock.date }
+            reader: reader, remote: remote, wake: wake, monotonicNow: { clock.seconds }
         )
     }
 
@@ -230,28 +244,28 @@ final class SleepEnforcerOrchestrationTests: XCTestCase {
     }
 
     func testPassTerminatesCaffeinateWhenDecaffeinated() {
-        processes.pids = [42]
+        processes.pids = ids(42)
         enforcer.enforceNow()
         XCTAssertEqual(processes.terminated, [42])
         XCTAssertEqual(sleeper.count, 0)
     }
 
     func testAlreadyGoneProcessIsIgnored() {
-        processes.pids = [42]
+        processes.pids = ids(42)
         processes.gone = [42]
         enforcer.enforceNow()
         XCTAssertEqual(processes.terminated, [42])
     }
 
     func testCaffeinatedMeansNoTerminate() throws {
-        processes.pids = [42]
+        processes.pids = ids(42)
         try power.caffeinate()
         enforcer.enforceNow()
         XCTAssertTrue(processes.terminated.isEmpty)
     }
 
     func testOnDecaffeinatedTriggersPass() throws {
-        processes.pids = [42]
+        processes.pids = ids(42)
         power.onDecaffeinated = { [enforcer] in enforcer?.enforceNow() }
         try power.caffeinate()
         try power.decaffeinate()
@@ -264,23 +278,78 @@ final class SleepEnforcerOrchestrationTests: XCTestCase {
         idle.displayAsleep = true
         enforcer.enforceNow()
         XCTAssertEqual(sleeper.count, 1)
-        clock.date.addTimeInterval(60)
+        clock.seconds += (60)
         enforcer.enforceNow()
         XCTAssertEqual(sleeper.count, 1, "cooldown should block the second sleep")
-        clock.date.addTimeInterval(300)
+        clock.seconds += (300)
         enforcer.enforceNow()
         XCTAssertEqual(sleeper.count, 2)
     }
 
     func testSettingOffSkipsEverything() {
         config.onlyInsomniaKeepsAwake = false
-        processes.pids = [42]
+        processes.pids = ids(42)
         reader.assertions = [holder()]
         idle.idle = 1200
         idle.displayAsleep = true
         enforcer.enforceNow()
         XCTAssertTrue(processes.terminated.isEmpty)
         XCTAssertEqual(sleeper.count, 0)
+    }
+
+    func testIdleChangingAfterSweepPreventsSleep() {
+        // Idle is past the threshold before the sweep; the user returns while caffeinate is being ended.
+        // The phase-2 read must see the new idle value and not sleep.
+        reader.assertions = [holder()]
+        idle.displayAsleep = true
+        idle.idle = 1200
+        processes.pids = ids(42)
+        let idle = self.idle!
+        processes.onTerminate = { idle.idle = 0 }
+        enforcer.enforceNow()
+        XCTAssertEqual(processes.terminated, [42])
+        XCTAssertEqual(sleeper.count, 0)
+    }
+
+    func testFailedAssertionReadDefersSleep() {
+        struct ReadFailure: Error {}
+        reader.error = ReadFailure()
+        idle.idle = 1200
+        idle.displayAsleep = true
+        enforcer.enforceNow()
+        XCTAssertEqual(sleeper.count, 0)
+    }
+
+    func testUnknownIdleOrThresholdDefersSleep() {
+        reader.assertions = [holder()]
+        idle.displayAsleep = true
+        idle.idle = nil
+        enforcer.enforceNow()
+        idle.idle = 1200
+        idle.threshold = nil
+        enforcer.enforceNow()
+        XCTAssertEqual(sleeper.count, 0)
+    }
+
+    func testBackgroundTaskFromBackupdExemptsSleep() {
+        // backupd's BackgroundTask doesn't block idle sleep but still signals real work.
+        let backup = ForeignAssertion(pid: 7, processName: "backupd", owningAppName: "backupd",
+                                      type: "BackgroundTask", name: "backup")
+        reader.assertions = [holder(), backup]
+        idle.idle = 1200
+        idle.displayAsleep = true
+        enforcer.enforceNow()
+        XCTAssertEqual(sleeper.count, 0)
+    }
+
+    func testEnablingSettingRunsImmediatePass() {
+        config.onlyInsomniaKeepsAwake = false
+        processes.pids = ids(42)
+        config.onEnforcementEnabled = { [enforcer] in
+            MainActor.assumeIsolated { enforcer?.enforceNow() }
+        }
+        config.onlyInsomniaKeepsAwake = true
+        XCTAssertEqual(processes.terminated, [42])
     }
 }
 
@@ -313,6 +382,49 @@ final class ForeignAssertionTests: XCTestCase {
         XCTAssertFalse(holder(6, process: "caffeinate", app: "claude").isSystemPolicy)
     }
 
+    func testReaderParseKeepsAllTypesAndDropsPowerdAndSelf() {
+        func entry(_ type: String, _ name: String) -> [String: Any] {
+            ["AssertType": type, "AssertName": name]
+        }
+        let table: [NSNumber: [[String: Any]]] = [
+            10: [entry("PreventUserIdleSystemSleep", "caffeinate command-line tool")],
+            20: [entry("BackgroundTask", "backup")],
+            30: [entry("PreventUserIdleSystemSleep", "Powerd - Prevent sleep while display is on")],
+            40: [entry("PreventUserIdleSystemSleep", "ours")],
+        ]
+        let names: [Int32: String] = [10: "caffeinate", 20: "backupd", 30: "powerd", 40: "Insomnia", 99: "claude"]
+        let parents: [Int32: Int32] = [10: 99]
+        let parsed = IOKitForeignAssertionReader.parse(
+            table, ownPid: 40, nameOf: { names[$0] }, parentOf: { parents[$0] }, displayNameOf: { names[$0] }
+        )
+        // Sorted by owning app name: "backupd" < "claude".
+        XCTAssertEqual(parsed.map(\.pid), [20, 10])
+        let caffeinate = parsed.first { $0.pid == 10 }
+        XCTAssertEqual(caffeinate?.owningAppName, "claude")
+        XCTAssertEqual(caffeinate?.blocksIdleSleep, true)
+        XCTAssertEqual(parsed.first { $0.pid == 20 }?.blocksIdleSleep, false)
+        XCTAssertFalse(parsed.contains { $0.pid == 30 || $0.pid == 40 })
+    }
+
+    func testSummaryHidesNonBlockingTypes() {
+        let task = ForeignAssertion(pid: 7, processName: "backupd", owningAppName: "backupd",
+                                    type: "BackgroundTask", name: "backup")
+        XCTAssertTrue(ForeignHolderSummary.rows(for: [task]).isEmpty)
+    }
+
+    func testRemoteProcessDetection() {
+        let names: [Int32: String] = [1: "launchd", 2: "sshd", 3: "sshd", 4: "sshd-session", 5: "zsh", 6: "screensharingd"]
+        let parents: [Int32: Int32] = [2: 1, 3: 2, 4: 3, 5: 4, 6: 1]
+        func detect(_ pids: [Int32]) -> Bool {
+            SystemRemoteSessionDetector.hasRemoteProcess(pids: pids, nameOf: { names[$0] }, parentOf: { parents[$0] })
+        }
+        XCTAssertFalse(detect([1, 2]), "launchd-owned sshd is just the listener")
+        XCTAssertTrue(detect([3]), "sshd child of sshd is a connection")
+        XCTAssertTrue(detect([4]), "sshd-session means an SSH connection, with or without a PTY")
+        XCTAssertTrue(detect([6]), "screensharingd runs per connection")
+        XCTAssertFalse(detect([5]))
+    }
+
     func testSummaryEmptyForNoHolders() {
         XCTAssertTrue(ForeignHolderSummary.rows(for: []).isEmpty)
     }
@@ -331,5 +443,38 @@ final class OnlyInsomniaSettingTests: XCTestCase {
         let first = InsomniaConfiguration(defaults: defaults)
         first.onlyInsomniaKeepsAwake = false
         XCTAssertFalse(InsomniaConfiguration(defaults: defaults).onlyInsomniaKeepsAwake)
+    }
+}
+
+// MARK: - Threshold
+
+final class SleepThresholdTests: XCTestCase {
+    private let prefs: [String: Any] = [
+        "AC Power": ["System Sleep Timer": 1, "Display Sleep Timer": 30],
+        "Battery Power": ["System Sleep Timer": 1, "Display Sleep Timer": 10],
+        "UPS Power": ["System Sleep Timer": 5, "Display Sleep Timer": 5],
+    ]
+
+    func testACUsesLargerTimer() {
+        XCTAssertEqual(SystemIdleState.threshold(from: prefs, sourceKey: "AC Power"), 1800)
+    }
+
+    func testBatteryUsesLargerTimer() {
+        XCTAssertEqual(SystemIdleState.threshold(from: prefs, sourceKey: "Battery Power"), 600)
+    }
+
+    func testMissingKeyIsNil() {
+        let partial: [String: Any] = ["AC Power": ["System Sleep Timer": 1]]
+        XCTAssertNil(SystemIdleState.threshold(from: partial, sourceKey: "AC Power"))
+    }
+
+    func testBothZeroIsNil() {
+        let never: [String: Any] = ["AC Power": ["System Sleep Timer": 0, "Display Sleep Timer": 0]]
+        XCTAssertNil(SystemIdleState.threshold(from: never, sourceKey: "AC Power"))
+    }
+
+    func testUPSOrUnknownSourceIsNil() {
+        XCTAssertNil(SystemIdleState.threshold(from: prefs, sourceKey: nil))
+        XCTAssertNil(SystemIdleState.threshold(from: prefs, sourceKey: "Elsewhere"))
     }
 }

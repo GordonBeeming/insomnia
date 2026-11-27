@@ -50,6 +50,7 @@ final class MenuBarViewModel {
     }
 
     /// Re-reads other processes' assertions. Called when the menu opens.
+    @MainActor
     func refreshForeignHolders() {
         foreignHolders = enforcer?.currentForeignHolders() ?? []
     }
