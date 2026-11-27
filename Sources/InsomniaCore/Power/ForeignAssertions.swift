@@ -207,6 +207,12 @@ public enum ProcessTable {
         bsdInfo(of: pid)?.pbi_ruid
     }
 
+    /// When the process started, or nil when unreadable. Used to tell a pid's original owner from a reuse.
+    public static func startDate(of pid: Int32) -> Date? {
+        guard let info = bsdInfo(of: pid) else { return nil }
+        return Date(timeIntervalSince1970: TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1_000_000)
+    }
+
     /// Full executable path via `proc_pidpath`, or nil when unreadable.
     public static func path(of pid: Int32) -> String? {
         // PROC_PIDPATHINFO_MAXSIZE is 4 * MAXPATHLEN; spelled out because the macro isn't imported.
@@ -261,12 +267,15 @@ public final class IOKitForeignAssertionReader: ForeignAssertionReading, @unchec
         }
         return Self.parse(
             table, ownPid: ownPid, nameOf: ProcessTable.name(of:),
-            parentOf: ProcessTable.parentPid(of:), displayNameOf: ProcessTable.displayName(of:)
+            parentOf: ProcessTable.parentPid(of:), displayNameOf: ProcessTable.displayName(of:),
+            startDateOf: ProcessTable.startDate(of:)
         )
     }
 
     /// Key in each assertion dictionary naming the holding process.
     static let processNameKey = "Process Name"
+    /// Key holding the CFDate the assertion was created.
+    static let assertStartKey = "AssertStartWhen"
     /// Key naming the pid an assertion was taken on behalf of (e.g. by runningboardd for an app).
     static let onBehalfOfPidKey = "AssertionOnBehalfOfPID"
 
@@ -276,7 +285,8 @@ public final class IOKitForeignAssertionReader: ForeignAssertionReading, @unchec
         ownPid: Int32,
         nameOf: (Int32) -> String?,
         parentOf: (Int32) -> Int32?,
-        displayNameOf: (Int32) -> String?
+        displayNameOf: (Int32) -> String?,
+        startDateOf: (Int32) -> Date? = { _ in nil }
     ) -> [ForeignAssertion] {
         var found: [ForeignAssertion] = []
         for (pidNumber, assertions) in table {
@@ -294,8 +304,12 @@ public final class IOKitForeignAssertionReader: ForeignAssertionReading, @unchec
                 let name = assertion[kIOPMAssertionNameKey as String] as? String ?? ""
                 // runningboardd and friends hold assertions on behalf of an app; that app is who the user cares about.
                 var owner = holderOwner
+                // The beneficiary pid may have been reused since the assertion was created. Only trust it when
+                // that process demonstrably started no later than the assertion; a missing timestamp means unknown.
                 if let behalf = (assertion[onBehalfOfPidKey] as? NSNumber)?.int32Value, behalf > 0,
-                   displayNameOf(behalf) != nil {
+                   displayNameOf(behalf) != nil,
+                   let assertionStart = assertion[assertStartKey] as? Date,
+                   let processStart = startDateOf(behalf), processStart <= assertionStart {
                     owner = OwningAppResolver.resolve(pid: behalf, parentOf: parentOf, nameOf: displayNameOf)
                 } else if holderOwner.hasPrefix("pid ") {
                     // Neither lookup could name the holder; the table's own name beats "pid N".
