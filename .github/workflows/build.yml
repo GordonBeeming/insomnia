@@ -37,7 +37,7 @@ on:
 jobs:
   build-and-test:
     # Use macOS 14 runner — provides Apple Silicon (M1) hardware for arm64 builds
-    runs-on: macos-14
+    runs-on: macos-15
     # Human-readable name shown in the GitHub Actions UI
     name: Build & Test
 
@@ -75,7 +75,7 @@ jobs:
     # Only trigger on release events (not on push or PR)
     if: github.event_name == 'release'
     # Apple Silicon runner for native arm64 builds
-    runs-on: macos-14
+    runs-on: macos-15
     name: Sign, Notarize & Release
     # Grant write access to upload assets to the GitHub Release
     permissions:
