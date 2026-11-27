@@ -31,6 +31,9 @@ struct MenuBarView: View {
         // Status text at the top of the menu
         statusSection
 
+        // Other apps holding the Mac awake, if any
+        foreignHoldersSection
+
         Divider()
 
         // Primary toggle button — caffeinate or decaffeinate
@@ -64,6 +67,23 @@ struct MenuBarView: View {
     private var statusSection: some View {
         // Show the status text from the view model (includes emoji)
         Text(viewModel.statusText)
+            // Read other holders each time the menu opens rather than polling
+            .onAppear { viewModel.refreshForeignHolders() }
+    }
+
+    // MARK: - Foreign Holders Section
+
+    /// Disabled rows listing other apps that keep the Mac awake; hidden when there are none.
+    @ViewBuilder
+    private var foreignHoldersSection: some View {
+        let rows = viewModel.foreignHolderRows
+        if !rows.isEmpty {
+            Divider()
+            Text("Also keeping your Mac awake:")
+            ForEach(rows, id: \.self) { row in
+                Text(row)
+            }
+        }
     }
 
     // MARK: - Toggle Section

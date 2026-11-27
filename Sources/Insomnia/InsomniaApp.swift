@@ -105,7 +105,8 @@ struct InsomniaApp: App {
                     // Initialize the view model from the app delegate's scheduler
                     viewModel = MenuBarViewModel(
                         scheduler: appDelegate.scheduler,
-                        configuration: appDelegate.configuration
+                        configuration: appDelegate.configuration,
+                        enforcer: appDelegate.sleepEnforcer
                     )
                 }
         }

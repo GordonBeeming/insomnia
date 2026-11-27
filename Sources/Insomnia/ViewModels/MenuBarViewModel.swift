@@ -25,6 +25,12 @@ final class MenuBarViewModel {
     /// User preferences loaded from UserDefaults.
     let configuration: InsomniaConfiguration
 
+    /// The sleep enforcer, used to read other apps' assertions for the menu.
+    let enforcer: SleepEnforcer?
+
+    /// Other processes' assertions, refreshed when the menu opens (not polled).
+    private(set) var foreignHolders: [ForeignAssertion] = []
+
     // MARK: - Initialization
 
     /// Creates a menu bar view model with the given scheduler and configuration.
@@ -32,12 +38,26 @@ final class MenuBarViewModel {
     /// - Parameters:
     ///   - scheduler: The caffeination scheduler to use for all actions.
     ///   - configuration: The configuration providing user preferences.
+    ///   - enforcer: The sleep enforcer whose assertion reader feeds the menu. Optional for previews.
     init(
         scheduler: CaffeinationScheduler = CaffeinationScheduler(),
-        configuration: InsomniaConfiguration = InsomniaConfiguration()
+        configuration: InsomniaConfiguration = InsomniaConfiguration(),
+        enforcer: SleepEnforcer? = nil
     ) {
         self.scheduler = scheduler
         self.configuration = configuration
+        self.enforcer = enforcer
+    }
+
+    /// Re-reads other processes' assertions. Called when the menu opens.
+    @MainActor
+    func refreshForeignHolders() {
+        foreignHolders = enforcer?.currentForeignHolders() ?? []
+    }
+
+    /// Menu rows for the "Also keeping your Mac awake" section; empty hides the section.
+    var foreignHolderRows: [String] {
+        ForeignHolderSummary.rows(for: foreignHolders)
     }
 
     // MARK: - Computed Properties

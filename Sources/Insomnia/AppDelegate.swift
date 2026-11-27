@@ -13,8 +13,10 @@ import InsomniaCore
 /// - Creates and owns the shared ``CaffeinationScheduler`` used by both
 ///   the GUI and the IPC server
 /// - Starts the ``IPCServer`` on launch so the CLI can communicate
+/// - Runs the ``SleepEnforcer`` that ends other apps' caffeinate while decaffeinated
 /// - Starts the ``UpdateChecker`` for periodic GitHub release checks
 /// - Releases all power assertions and stops the IPC server on termination
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Shared State
 
@@ -24,6 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The user configuration shared across the application.
     let configuration = InsomniaConfiguration()
+
+    /// Enforces "only Insomnia keeps my Mac awake" while decaffeinated.
+    lazy var sleepEnforcer = SleepEnforcer(powerManager: scheduler.powerManager, configuration: configuration)
 
     /// The update checker that periodically queries GitHub for new releases.
     let updateChecker = UpdateChecker()
@@ -58,6 +63,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Ensure the app runs as a menu bar-only app (no dock icon)
         NSApp.setActivationPolicy(.accessory)
 
+        // Sweep right after every way of decaffeinating, then every 30 s
+        scheduler.powerManager.onDecaffeinated = { [weak self] in
+            // decaffeinate() can come from the IPC thread; the enforcer lives on the main actor
+            Task { @MainActor in self?.sleepEnforcer.enforceNow() }
+        }
+        configuration.onEnforcementEnabled = { [weak self] in
+            Task { @MainActor in self?.sleepEnforcer.enforceNow() }
+        }
+        sleepEnforcer.start()
+
         // Start periodic update checks (hourly, with an initial check on launch)
         updateChecker.startPeriodicChecks()
     }
@@ -67,6 +82,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Releases all active power assertions and stops the IPC server
     /// to ensure clean shutdown and socket cleanup.
     func applicationWillTerminate(_ notification: Notification) {
+        // Stop enforcing first so quitting doesn't kill other apps' caffeinate
+        scheduler.powerManager.onDecaffeinated = nil
+        configuration.onEnforcementEnabled = nil
+        sleepEnforcer.stop()
+
         // Release all power assertions and stop watches
         do {
             try scheduler.cancelAll()

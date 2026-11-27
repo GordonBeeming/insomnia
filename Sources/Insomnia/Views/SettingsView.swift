@@ -10,7 +10,7 @@ import InsomniaCore
 /// The settings window content, presented via the SwiftUI `Settings` scene.
 ///
 /// Organized into two sections:
-/// - **General**: Launch at login
+/// - **General**: Launch at login, only-Insomnia-keeps-awake enforcement
 /// - **Appearance**: Icon style, visibility, and remaining time display
 struct SettingsView: View {
     // MARK: - Dependencies
@@ -29,7 +29,7 @@ struct SettingsView: View {
             appearanceSection
         }
         .formStyle(.grouped)
-        .frame(width: 450, height: 300)
+        .frame(width: 450, height: 360)
     }
 
     // MARK: - General Section
@@ -39,6 +39,14 @@ struct SettingsView: View {
         Section("General") {
             // Toggle for automatic launch at system login
             Toggle("Launch at login", isOn: $viewModel.launchAtLogin)
+
+            // Enforcement toggle with a caption describing exactly what it does
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle("Only Insomnia keeps my Mac awake", isOn: $viewModel.onlyInsomniaKeepsAwake)
+                Text("When decaffeinated, ends other apps' caffeinate and lets the Mac sleep when idle.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

@@ -45,6 +45,8 @@ private enum ConfigKeys {
     static var showRemainingTimeInMenuBar: String { "\(BuildEnvironment.defaultsPrefix)showRemainingTimeInMenuBar" }
     /// Whether to launch the app at system login.
     static var launchAtLogin: String { "\(BuildEnvironment.defaultsPrefix)launchAtLogin" }
+    /// Whether Insomnia enforces that nothing else keeps the Mac awake while decaffeinated.
+    static var onlyInsomniaKeepsAwake: String { "\(BuildEnvironment.defaultsPrefix)onlyInsomniaKeepsAwake" }
     /// JSON-encoded array of schedule rules.
     static var scheduleRules: String { "\(BuildEnvironment.defaultsPrefix)scheduleRules" }
 }
@@ -95,6 +97,20 @@ public final class InsomniaConfiguration {
         }
     }
 
+    /// Whether, while decaffeinated, Insomnia ends other apps' `caffeinate` and lets the Mac sleep
+    /// when idle. On by default: the key is absent until the user changes it.
+    public var onlyInsomniaKeepsAwake: Bool {
+        didSet {
+            // Persist the updated value to UserDefaults
+            defaults.set(onlyInsomniaKeepsAwake, forKey: ConfigKeys.onlyInsomniaKeepsAwake)
+            // Turning enforcement on should act now, not at the next 30 s tick
+            if onlyInsomniaKeepsAwake && !oldValue { onEnforcementEnabled?() }
+        }
+    }
+
+    /// Called when `onlyInsomniaKeepsAwake` flips from off to on; the app wires it to an immediate enforcement pass.
+    @ObservationIgnored public var onEnforcementEnabled: (() -> Void)?
+
     /// The configured schedule rules for automatic caffeination.
     public var scheduleRules: [ScheduleRule] {
         didSet {
@@ -121,6 +137,8 @@ public final class InsomniaConfiguration {
         }
         self.showRemainingTimeInMenuBar = defaults.bool(forKey: ConfigKeys.showRemainingTimeInMenuBar)
         self.launchAtLogin = defaults.bool(forKey: ConfigKeys.launchAtLogin)
+        // Absent key means the user never chose, so default to enforcing
+        self.onlyInsomniaKeepsAwake = defaults.object(forKey: ConfigKeys.onlyInsomniaKeepsAwake) as? Bool ?? true
         // Load schedule rules from JSON data
         self.scheduleRules = InsomniaConfiguration.loadScheduleRules(from: defaults)
     }
